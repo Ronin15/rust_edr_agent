@@ -1,4 +1,4 @@
-# EDR Agent (Test Project)
+# EDR Agent
 
 > **⚠️ Test/Learning Project**: This is a test implementation of an Endpoint Detection and Response (EDR) agent built for learning and experimentation purposes. It is not intended for production use.....yet..
 
