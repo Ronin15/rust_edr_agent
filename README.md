@@ -1,6 +1,6 @@
 # EDR Agent (Test Project)
 
-> **⚠️ Test/Learning Project**: This is a test implementation of an Endpoint Detection and Response (EDR) agent built for learning and experimentation purposes. It is not intended for production use.
+> **⚠️ Test/Learning Project**: This is a test implementation of an Endpoint Detection and Response (EDR) agent built for learning and experimentation purposes. It is not intended for production use.....yet..
 
 A high-performance EDR agent prototype written in Rust, demonstrating modern security monitoring concepts and Rust async programming patterns.
 
