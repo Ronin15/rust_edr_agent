@@ -19,6 +19,7 @@ Thumbs.db
 /logs/
 /data/
 *.log
+*.json
 
 # Build artifacts
 /dist/
