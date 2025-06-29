@@ -1,0 +1,37 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and data
+/logs/
+/data/
+*.log
+
+# Build artifacts
+/dist/
+/build/
+
+# Configuration (if containing secrets)
+config.local.yaml
+.env
+
+# Test artifacts
+/test_output/
+/coverage/
+
+# Backup files
+*.bak
+*.backup

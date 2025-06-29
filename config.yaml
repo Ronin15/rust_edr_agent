@@ -1,0 +1,56 @@
+agent:
+  agent_id: null
+  hostname: null
+  collection_interval_ms: 5000
+  max_events_per_batch: 1000
+  max_memory_usage_mb: 512
+collectors:
+  process_monitor:
+    enabled: true
+    scan_interval_ms: 1000
+    track_child_processes: true
+    collect_command_line: true
+    collect_environment: false
+  file_monitor:
+    enabled: true
+    watched_paths:
+    - /
+    - C:\
+    ignored_extensions:
+    - .tmp
+    - .log
+    - .cache
+    max_file_size_mb: 100
+    calculate_hashes: true
+  network_monitor:
+    enabled: true
+    monitor_connections: true
+    monitor_dns: true
+    capture_packets: false
+    max_packet_size: 1500
+  registry_monitor:
+    enabled: false
+    watched_keys:
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+storage:
+  local_storage:
+    enabled: true
+    data_directory: ./data
+    compress_events: true
+  retention_days: 30
+  max_storage_size_gb: 10
+network:
+  enabled: false
+  server_url: null
+  api_key: null
+  batch_upload_interval_s: 300
+  max_retries: 3
+  timeout_s: 30
+  use_tls: true
+  verify_certificates: true
+logging:
+  level: info
+  file_path: ./logs/edr-agent.log
+  max_file_size_mb: 100
+  max_files: 10

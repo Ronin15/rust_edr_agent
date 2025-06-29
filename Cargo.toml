@@ -1,0 +1,81 @@
+[package]
+name = "edr-agent"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <simsjohn15@gmail.com>"]
+description = "Endpoint Detection and Response Agent"
+license = "MIT"
+repository = "https://github.com/RoninXV/edr-agent"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+tokio-util = "0.7"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Configuration
+config = "0.14"
+
+# System monitoring
+sysinfo = "0.30"
+notify = "6.0"
+
+# Network
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Cross-platform
+crossbeam = "0.8"
+uuid = { version = "1.0", features = ["v4"] }
+
+# Cryptography
+sha2 = "0.10"
+hex = "0.4"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+hostname = "0.3"
+
+# Async traits
+async-trait = "0.1"
+
+# Platform-specific dependencies
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3.9", features = ["winnt"] }
+windows = { version = "0.52", features = [
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Security",
+    "Win32_Foundation"
+]}
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+nix = { version = "0.27", features = ["process", "signal", "fs"] }
+
+[dev-dependencies]
+tempfile = "3.0"
+mockall = "0.12"
+
+[[bin]]
+name = "edr-agent"
+path = "src/edr_main.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
