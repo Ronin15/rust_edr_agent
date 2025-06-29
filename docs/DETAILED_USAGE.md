@@ -26,9 +26,10 @@ When running, the EDR agent will:
 
 ### 📊 Event Data
 **Location:** `./data/` directory
-- Files named: `events_<uuid>.json`
-- **Format:** JSON with structured event data
-- **Content:** Process creation, termination, modifications
+- Files named: `events_<uuid>.json.gz`
+- **Format:** Gzip-compressed JSON with structured event data
+- **Content:** Process, file system, and network events
+- **Compression:** ~90% size reduction for efficient storage
 - **Example:**
   ```json
   {
@@ -123,7 +124,7 @@ To see the agent detect real system activity:
    ls -la data/ | tail -5
    
    # Examine an event file
-   cat data/events_*.json | jq .
+   zcat data/events_*.json.gz | jq .
    
    # Monitor logs
    tail -f logs/*.log

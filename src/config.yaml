@@ -36,7 +36,7 @@ collectors:
 storage:
   local_storage:
     enabled: true
-    data_directory: "./data"
+    data_directory: ./data
     compress_events: true
   retention_days: 30
   max_storage_size_gb: 10

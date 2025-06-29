@@ -23,7 +23,7 @@ tail logs/*.log       # See log output
 
 | Data Type | Location | Format | Description |
 |-----------|----------|--------|-------------|
-| **Events** | `./data/*.json` | JSON | Process monitoring data |
+| **Events** | `./data/*.json.gz` | Compressed JSON | All EDR events (file/network/process) |
 | **Logs** | `./logs/*.log` | Text | Agent status & debug info |
 | **Config** | `./config.yaml` | YAML | Agent configuration |
 
@@ -35,13 +35,13 @@ tail logs/*.log       # See log output
 ls -lt data/
 
 # View latest event file with pretty formatting
-ls data/events_*.json | tail -1 | xargs cat | jq .
+ls data/events_*.json.gz | tail -1 | xargs zcat | jq .
 
 # Count total events
-cat data/*.json | jq '.events | length' | paste -sd+ | bc
+zcat data/*.json.gz | jq '.events | length' | paste -sd+ | bc
 
 # Search for specific process
-cat data/*.json | jq '.events[] | select(.data.Process.name == "cargo")'
+zcat data/*.json.gz | jq '.events[] | select(.data.Process.name == "cargo")'
 ```
 
 ### Monitor in Real-Time
@@ -59,13 +59,13 @@ RUST_LOG=debug cargo run | grep ERROR
 ### Analyze Activity
 ```bash
 # Find all process names seen
-cat data/*.json | jq -r '.events[].data.Process.name' | sort | uniq
+zcat data/*.json.gz | jq -r '.events[].data.Process.name' | sort | uniq
 
 # Show events by type
-cat data/*.json | jq -r '.events[].event_type' | sort | uniq -c
+zcat data/*.json.gz | jq -r '.events[].event_type' | sort | uniq -c
 
 # Find high memory usage processes
-cat data/*.json | jq '.events[] | select(.data.Process.memory_usage > 100000000)'
+zcat data/*.json.gz | jq '.events[] | select(.data.Process.memory_usage > 100000000)'
 ```
 
 ## ⚙️ Configuration Quick Reference
