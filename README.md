@@ -62,6 +62,27 @@ Edit `config.yaml` to customize the agent behavior:
 - Enable/disable specific collectors
 - Configure storage and logging settings
 
+## 📖 Documentation
+
+For comprehensive documentation, see the `/docs` directory:
+
+- **[Quick Usage Guide](docs/USAGE.md)** - Get started in 30 seconds
+- **[Detailed Usage](docs/DETAILED_USAGE.md)** - In-depth usage instructions
+
+### Quick Test Run
+```bash
+# 1. Build and run
+cargo build
+RUST_LOG=info cargo run
+
+# 2. In another terminal, generate activity
+ls -la && ps aux
+
+# 3. Check results
+ls data/          # Event files
+tail logs/*.log   # Log output
+```
+
 ## 🏗️ Architecture
 
 ```
