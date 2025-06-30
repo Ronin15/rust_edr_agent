@@ -1,7 +1,6 @@
-use anyhow::{Result, Context};
+use anyhow::Result;
 use tracing::{info, warn, error};
 use tokio::sync::mpsc;
-use std::sync::Arc;
 
 use crate::config::CollectorsConfig;
 use crate::events::Event;
@@ -185,7 +184,7 @@ impl CollectorManager {
         statuses
     }
     
-    pub async fn update_config(&self, new_config: CollectorsConfig) -> Result<()> {
+    pub async fn update_config(&self, _new_config: CollectorsConfig) -> Result<()> {
         info!("Updating collector configuration");
         
         // For now, we'll just log the update

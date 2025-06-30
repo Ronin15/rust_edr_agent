@@ -1,9 +1,8 @@
 use anyhow::Result;
-use tracing::{info, warn, error, debug};
+use tracing::{info, error, debug};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
 use std::process::Command;
-use std::collections::HashSet;
 
 use crate::config::NetworkMonitorConfig;
 use crate::events::{Event, EventType, EventData, NetworkEventData, NetworkDirection};

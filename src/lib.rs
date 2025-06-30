@@ -11,6 +11,8 @@ pub mod collectors {
     pub mod process;
     pub mod file;
     pub mod network;
+    
+    #[cfg(windows)]
     pub mod registry;
     
     // Re-export the manager and related types
@@ -20,6 +22,8 @@ pub mod collectors {
 
 pub mod detectors {
     pub mod injection;
+    
+    #[cfg(windows)]
     pub mod registry;
     
     // Re-export the manager and related types

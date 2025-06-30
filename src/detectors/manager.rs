@@ -1,7 +1,6 @@
-use anyhow::{Result, Context};
+use anyhow::Result;
 use tracing::{info, warn, error};
 use tokio::sync::mpsc;
-use std::sync::Arc;
 
 use crate::config::DetectorsConfig;
 use crate::events::Event;
@@ -18,12 +17,16 @@ pub struct DetectorStatus {
 }
 
 use super::injection::InjectionDetector;
+
+#[cfg(windows)]
 use super::registry::RegistryDetector;
 
 // Enum to hold different detector types
 #[derive(Debug)]
 pub enum DetectorInstance {
     Injection(InjectionDetector),
+    
+    #[cfg(windows)]
     Registry(RegistryDetector),
     // Future detectors:
     // Malware(MalwareDetector),
@@ -34,6 +37,8 @@ impl DetectorInstance {
     pub async fn start(&self) -> Result<()> {
         match self {
             DetectorInstance::Injection(d) => d.start().await,
+            
+            #[cfg(windows)]
             DetectorInstance::Registry(d) => d.start().await,
         }
     }
@@ -41,6 +46,8 @@ impl DetectorInstance {
     pub async fn stop(&self) -> Result<()> {
         match self {
             DetectorInstance::Injection(d) => d.stop().await,
+            
+            #[cfg(windows)]
             DetectorInstance::Registry(d) => d.stop().await,
         }
     }
@@ -48,6 +55,8 @@ impl DetectorInstance {
     pub async fn is_running(&self) -> bool {
         match self {
             DetectorInstance::Injection(d) => d.is_running().await,
+            
+            #[cfg(windows)]
             DetectorInstance::Registry(d) => d.is_running().await,
         }
     }
@@ -55,6 +64,8 @@ impl DetectorInstance {
     pub async fn get_status(&self) -> DetectorStatus {
         match self {
             DetectorInstance::Injection(d) => d.get_status().await,
+            
+            #[cfg(windows)]
             DetectorInstance::Registry(d) => d.get_status().await,
         }
     }
@@ -62,6 +73,8 @@ impl DetectorInstance {
     pub fn name(&self) -> &'static str {
         match self {
             DetectorInstance::Injection(d) => d.name(),
+            
+            #[cfg(windows)]
             DetectorInstance::Registry(d) => d.name(),
         }
     }
@@ -69,6 +82,8 @@ impl DetectorInstance {
     pub async fn process_event(&self, event: &Event) -> Result<()> {
         match self {
             DetectorInstance::Injection(d) => d.process_event(event).await,
+            
+            #[cfg(windows)]
             DetectorInstance::Registry(d) => d.process_event(event).await,
         }
     }
@@ -148,7 +163,8 @@ impl DetectorManager {
             detectors.push(DetectorInstance::Injection(detector));
         }
         
-        // Initialize registry detector
+        // Initialize registry detector (Windows only)
+        #[cfg(windows)]
         if config.registry_monitor.enabled {
             info!("Initializing registry detector");
             let detector = RegistryDetector::new(

@@ -3,9 +3,7 @@ use tracing::{info, warn, error, debug};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
 use std::path::Path;
-use std::time::SystemTime;
-use notify::{Watcher, RecursiveMode, Event as NotifyEvent, EventKind, RecommendedWatcher};
-use tokio::sync::mpsc::UnboundedSender;
+use notify::{Watcher, RecursiveMode, Event as NotifyEvent, EventKind};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;

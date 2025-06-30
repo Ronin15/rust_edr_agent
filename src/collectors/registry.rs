@@ -1,8 +1,7 @@
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
-
 use crate::config::RegistryMonitorConfig;
 use crate::events::{Event, EventType, EventData, RegistryEventData};
 use crate::collectors::{Collector, EventCollector};
@@ -269,7 +268,7 @@ impl RegistryCollector {
         subkey: String,
         event_sender: mpsc::Sender<Event>,
         events_collected: Arc<RwLock<u64>>,
-        last_error: Arc<RwLock<Option<String>>>,
+        _last_error: Arc<RwLock<Option<String>>>,
         hostname: String,
         agent_id: String,
         is_running: Arc<RwLock<bool>>,
@@ -278,7 +277,7 @@ impl RegistryCollector {
         use windows::Win32::Foundation::*;
         use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
         use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
-        use windows::core::{PCWSTR, Result as WindowsResult};
+        use windows::core::PCWSTR;
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
         
@@ -352,12 +351,19 @@ impl RegistryCollector {
                         // Registry change detected
                         info!("Registry change detected in key: {}", key_path);
                         
-                        // Create and send event
-                        let registry_event = Self::create_registry_event_static(
+                        // Create and send event using the instance method
+                        let collector = RegistryCollector {
+                            config: RegistryMonitorConfig { enabled: true, watched_keys: vec![] },
+                            event_sender: event_sender.clone(),
+                            is_running: Arc::new(RwLock::new(true)),
+                            hostname: hostname.clone(),
+                            agent_id: agent_id.clone(),
+                            events_collected: Arc::new(RwLock::new(0)),
+                            last_error: Arc::new(RwLock::new(None)),
+                        };
+                        let registry_event = collector.create_registry_event(
                             EventType::RegistryKeyModified,
                             key_path.clone(),
-                            hostname.clone(),
-                            agent_id.clone(),
                         );
                         
                         // Send the event asynchronously
@@ -429,31 +435,6 @@ impl RegistryCollector {
         } else {
             (HKEY::default(), String::new())
         }
-    }
-    
-    fn create_registry_event_static(
-        event_type: EventType,
-        key_path: String,
-        hostname: String,
-        agent_id: String,
-    ) -> Event {
-        let data = EventData::Registry(RegistryEventData {
-            key_path,
-            value_name: None,
-            value_type: None,
-            value_data: None,
-            old_value_data: None,
-            process_id: None,
-            process_name: None,
-        });
-        
-        Event::new(
-            event_type,
-            "registry_monitor".to_string(),
-            hostname,
-            agent_id,
-            data,
-        )
     }
 }
 

@@ -3,13 +3,13 @@ use std::time::{Duration, Instant};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
-use anyhow::{Result, Context};
-use tracing::{debug, warn, error, info};
+use anyhow::Result;
+use tracing::{error, info};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 use chrono::Utc;
 
-use crate::events::{Event, EventType, EventData, RegistryEventData};
+use crate::events::{Event, EventData, RegistryEventData};
 use crate::detectors::{Detector, DetectorAlert, AlertSeverity, DetectorStatus};
 use crate::config::RegistryMonitorConfig;
 
@@ -537,7 +537,7 @@ impl RegistryDetector {
             metadata.insert("process_id".to_string(), process_id.to_string());
         }
 
-        DetectorAlert {
+        let mut alert = DetectorAlert {
             id: Uuid::new_v4().to_string(),
             detector_name: "registry_detector".to_string(),
             severity,
@@ -549,7 +549,13 @@ impl RegistryDetector {
             risk_score: registry_event.risk_score,
             timestamp: Utc::now(),
             metadata,
-        }
+        };
+        
+        // Add agent_id and hostname to metadata
+        alert.metadata.insert("agent_id".to_string(), self.agent_id.clone());
+        alert.metadata.insert("hostname".to_string(), self.hostname.clone());
+        
+        alert
     }
 }
 

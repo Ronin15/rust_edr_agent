@@ -315,7 +315,7 @@ impl Agent {
         self.storage_manager.store_batch(&batch).await
     }
     
-    async fn send_alert_to_server(&self, alert: &DetectorAlert, network_manager: &NetworkManager) -> Result<()> {
+    async fn send_alert_to_server(&self, alert: &DetectorAlert, _network_manager: &NetworkManager) -> Result<()> {
         // This would be implemented to send alerts to a SIEM or security management platform
         // For now, we'll just log that we would send it
         debug!("Would send alert {} to remote server", alert.id);

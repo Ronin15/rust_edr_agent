@@ -7,7 +7,6 @@ use tokio::signal;
 use edr_agent::{
     config::Config,
     agent::Agent,
-    utils,
 };
 
 #[tokio::main]

@@ -4,12 +4,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
-use tracing::{debug, warn, error, info};
+use tracing::{debug, info};
 use tokio::sync::mpsc;
-use uuid::Uuid;
-use chrono::Utc;
 
-use crate::events::{Event, EventType, EventData, ProcessEventData, FileEventData, NetworkEventData};
+use crate::events::{Event, EventData, ProcessEventData, FileEventData, NetworkEventData};
 use crate::detectors::{Detector, EventDetector, DetectorAlert, AlertSeverity};
 use crate::detectors::DetectorStatus;
 use crate::config::ProcessInjectionConfig;
@@ -373,7 +371,7 @@ impl InjectionDetector {
     async fn analyze_process_event(
         &self,
         tracker: &mut ProcessTracker,
-        event: &Event,
+        _event: &Event,
         process_data: &ProcessEventData,
     ) -> Result<Option<DetectorAlert>> {
         let pid = process_data.pid;
@@ -736,7 +734,9 @@ impl InjectionDetector {
         )
         .with_risk_score(risk_score)
         .with_metadata("platform".to_string(), std::env::consts::OS.to_string())
-        .with_metadata("event_type".to_string(), format!("{:?}", event_type));
+        .with_metadata("event_type".to_string(), format!("{:?}", event_type))
+        .with_metadata("agent_id".to_string(), self.agent_id.clone())
+        .with_metadata("hostname".to_string(), self.hostname.clone());
         
         for pid in affected_processes {
             alert = alert.with_process(pid);

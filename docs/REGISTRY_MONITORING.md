@@ -4,6 +4,8 @@
 
 The Registry Detector is part of our EDR agent's comprehensive monitoring capabilities, designed specifically to track changes within the Windows Registry.
 
+**Platform Support**: This feature is **Windows-only** and will be automatically disabled on Linux and macOS systems.
+
 ## Features
 
 - **Real-Time Detection**: Monitors specified registry keys continuously and detects changes in real-time.

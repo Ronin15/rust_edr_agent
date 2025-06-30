@@ -1,10 +1,9 @@
 use anyhow::Result;
-use tracing::{debug, error, warn, info};
+use tracing::{debug, error, info};
 use tokio::sync::{mpsc, RwLock};
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
-use sysinfo::{System, Process, Pid};
+use std::collections::HashMap;
+use sysinfo::System;
 
 use crate::config::ProcessMonitorConfig;
 use crate::events::{Event, EventType, EventData, ProcessEventData};
@@ -78,7 +77,7 @@ impl ProcessCollector {
                 pid: pid_val,
                 name: process.name().to_string(),
                 path: process.exe().map(|p| p.display().to_string()).unwrap_or_default(),
-                start_time: std::time::SystemTime::now(), // sysinfo doesn't provide start time directly
+                start_time: std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(process.start_time()),
                 cpu_usage: process.cpu_usage(),
                 memory_usage: process.memory(),
             };
