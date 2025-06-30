@@ -6,12 +6,7 @@ use std::time::Duration;
 
 use crate::config::Config;
 use crate::events::{Event, EventBatch};
-use crate::collectors::{
-    CollectorManager,
-    process::ProcessCollector,
-    file::FileCollector,
-    network::NetworkCollector,
-};
+use crate::collectors::CollectorManager;
 use crate::storage::StorageManager;
 use crate::network::NetworkManager;
 use crate::detectors::{DetectorManager, DetectorAlert};
@@ -116,11 +111,16 @@ impl Agent {
                 .context("Alert receiver already taken")?
         };
         
-        // Run both event processing and alert handling concurrently
-        let event_processing = self.process_events(event_receiver);
-        let alert_handling = self.process_alerts(alert_receiver);
+        info!("Starting alert processing");
         
-        tokio::try_join!(event_processing, alert_handling)?;
+        // Run both event processing and alert handling concurrently
+        let (event_result, alert_result) = tokio::join!(
+            self.process_events(event_receiver),
+            self.process_alerts(alert_receiver)
+        );
+        
+        event_result?;
+        alert_result?;
         
         Ok(())
     }

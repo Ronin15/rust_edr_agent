@@ -6,6 +6,7 @@ authors = ["Your Name <simsjohn15@gmail.com>"]
 description = "Endpoint Detection and Response Agent"
 license = "MIT"
 repository = "https://github.com/RoninXV/edr-agent"
+default-run = "edr-agent"
 
 [dependencies]
 # Async runtime

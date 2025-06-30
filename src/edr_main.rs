@@ -3,17 +3,12 @@ use tracing::{info, error};
 use std::sync::Arc;
 use tokio::signal;
 
-mod config;
-mod agent;
-mod collectors;
-mod detectors;
-mod events;
-mod storage;
-mod network;
-mod utils;
-
-use config::Config;
-use agent::Agent;
+// Use the library modules
+use edr_agent::{
+    config::Config,
+    agent::Agent,
+    utils,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {

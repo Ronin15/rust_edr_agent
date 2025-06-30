@@ -1,10 +1,9 @@
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use std::path::PathBuf;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use std::io::Write;
-use std::time::SystemTime;
 use chrono::{DateTime, Utc, Duration};
 
 use crate::config::StorageConfig;
