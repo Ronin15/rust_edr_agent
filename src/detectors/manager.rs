@@ -18,11 +18,13 @@ pub struct DetectorStatus {
 }
 
 use super::injection::InjectionDetector;
+use super::registry::RegistryDetector;
 
 // Enum to hold different detector types
 #[derive(Debug)]
 pub enum DetectorInstance {
     Injection(InjectionDetector),
+    Registry(RegistryDetector),
     // Future detectors:
     // Malware(MalwareDetector),
     // Anomaly(AnomalyDetector),
@@ -32,36 +34,42 @@ impl DetectorInstance {
     pub async fn start(&self) -> Result<()> {
         match self {
             DetectorInstance::Injection(d) => d.start().await,
+            DetectorInstance::Registry(d) => d.start().await,
         }
     }
     
     pub async fn stop(&self) -> Result<()> {
         match self {
             DetectorInstance::Injection(d) => d.stop().await,
+            DetectorInstance::Registry(d) => d.stop().await,
         }
     }
     
     pub async fn is_running(&self) -> bool {
         match self {
             DetectorInstance::Injection(d) => d.is_running().await,
+            DetectorInstance::Registry(d) => d.is_running().await,
         }
     }
     
     pub async fn get_status(&self) -> DetectorStatus {
         match self {
             DetectorInstance::Injection(d) => d.get_status().await,
+            DetectorInstance::Registry(d) => d.get_status().await,
         }
     }
     
     pub fn name(&self) -> &'static str {
         match self {
             DetectorInstance::Injection(d) => d.name(),
+            DetectorInstance::Registry(d) => d.name(),
         }
     }
     
     pub async fn process_event(&self, event: &Event) -> Result<()> {
         match self {
             DetectorInstance::Injection(d) => d.process_event(event).await,
+            DetectorInstance::Registry(d) => d.process_event(event).await,
         }
     }
 }
@@ -138,6 +146,18 @@ impl DetectorManager {
                 hostname.clone(),
             ).await?;
             detectors.push(DetectorInstance::Injection(detector));
+        }
+        
+        // Initialize registry detector
+        if config.registry_monitor.enabled {
+            info!("Initializing registry detector");
+            let detector = RegistryDetector::new(
+                config.registry_monitor.clone(),
+                alert_sender.clone(),
+                agent_id.clone(),
+                hostname.clone(),
+            ).await?;
+            detectors.push(DetectorInstance::Registry(detector));
         }
         
         // Future detectors can be initialized here

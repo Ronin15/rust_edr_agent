@@ -409,4 +409,29 @@ pub mod builders {
             data,
         )
     }
+    
+    pub fn create_registry_event(
+        event_type: EventType,
+        key_path: String,
+        hostname: String,
+        agent_id: String,
+    ) -> Event {
+        let data = EventData::Registry(RegistryEventData {
+            key_path,
+            value_name: None,
+            value_type: None,
+            value_data: None,
+            old_value_data: None,
+            process_id: None,
+            process_name: None,
+        });
+        
+        Event::new(
+            event_type,
+            "registry_monitor".to_string(),
+            hostname,
+            agent_id,
+            data,
+        )
+    }
 }

@@ -19,7 +19,7 @@ This project serves as a:
 - **Process Monitoring**: Track process creation, termination, and behavior changes
 - **File System Monitoring**: Real-time file system event detection with file hashing
 - **Network Monitoring**: Network connection and DNS query tracking
-- **Registry Monitoring**: Windows registry change detection (currently support is planned)
+- **Registry Monitoring**: Windows registry change detection with real-time alerting
 - **Cross-Platform Support**: Designed for Windows, Linux, and macOS
 - **High Performance**: ~120 MB memory footprint with 90%+ event compression
 - **Configurable**: YAML-based configuration with reasonable defaults
@@ -38,13 +38,13 @@ This project serves as a:
 - **Process Monitoring**: Real-time process creation/termination/modification tracking with CPU/memory metrics
 - **File System Monitoring**: Live file change detection with hash calculation and metadata extraction
 - **Network Monitoring**: Connection tracking via netstat/lsof with protocol and process mapping
+- **Registry Monitoring**: Windows registry change detection with real-time alerting and threat detection
 - **Event System**: Unified event format, batching, and structured data
 - **Storage Management**: Compressed storage (90%+ compression), automatic cleanup, retention policies
 - **Logging**: Structured logging with file rotation and console output
 - **Cross-platform Support**: Works on Windows, macOS, and Linux
 
 ### 🔄 Partially Implemented
-- **Registry Monitoring**: Basic structure exists but Windows-only and needs testing
 - **Network Manager**: Stub implementation for remote data transmission
 
 ### 📋 Planned/Missing

@@ -29,10 +29,14 @@ collectors:
     capture_packets: false
     max_packet_size: 1500
   registry_monitor:
-    enabled: false
+    enabled: true
     watched_keys:
     - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
     - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    - HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Classes
+    - HKEY_LOCAL_MACHINE\SAM
 detectors:
   injection:
     enabled: true
@@ -43,6 +47,15 @@ detectors:
     monitor_memory_operations: true
     monitor_thread_operations: true
     cross_platform_detection: true
+  registry_monitor:
+    enabled: true
+    watched_keys:
+      - "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+      - "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+      - "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
+      - "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
+      - "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services"
+      - "HKEY_LOCAL_MACHINE\\SAM"
 storage:
   local_storage:
     enabled: true

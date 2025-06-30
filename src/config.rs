@@ -62,9 +62,22 @@ pub struct RegistryMonitorConfig {
     pub watched_keys: Vec<String>,
 }
 
+impl Default for RegistryMonitorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: cfg!(windows),
+            watched_keys: vec![
+                "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
+                "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
+            ],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DetectorsConfig {
     pub injection: ProcessInjectionConfig,
+    pub registry_monitor: RegistryMonitorConfig,
     // pub malware_detector: MalwareDetectorConfig,
     // pub anomaly_detector: AnomalyDetectorConfig,
 }
@@ -258,6 +271,13 @@ impl Default for Config {
                     monitor_memory_operations: true,
                     monitor_thread_operations: true,
                     cross_platform_detection: true,
+                },
+                registry_monitor: RegistryMonitorConfig {
+                    enabled: cfg!(windows),
+                    watched_keys: vec![
+                        "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
+                        "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
+                    ],
                 },
             },
             storage: StorageConfig {

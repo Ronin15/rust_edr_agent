@@ -20,6 +20,7 @@ pub mod collectors {
 
 pub mod detectors {
     pub mod injection;
+    pub mod registry;
     
     // Re-export the manager and related types
     mod manager;
