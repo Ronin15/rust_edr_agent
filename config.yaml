@@ -13,6 +13,7 @@ collectors:
     collect_environment: false
   file_monitor:
     enabled: true
+    # Note: Paths are automatically filtered based on OS - Windows ignores '/', Unix/Linux/Mac ignore 'C:\'
     watched_paths:
     - /
     - C:\

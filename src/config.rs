@@ -47,6 +47,22 @@ pub struct FileMonitorConfig {
     pub calculate_hashes: bool,
 }
 
+impl FileMonitorConfig {
+    pub fn filter_watched_paths_for_platform(&mut self) {
+        self.watched_paths.retain(|path| {
+            let path_str = path.to_string_lossy();
+            #[cfg(windows)]
+            {
+                !(path_str == "/")
+            }
+            #[cfg(not(windows))]
+            {
+                !(path_str == "C:\\")
+            }
+        });
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkMonitorConfig {
     pub enabled: bool,
@@ -144,6 +160,7 @@ impl Config {
         
         // Set defaults and validate
         config.set_defaults()?;
+        config.set_platform_specifics()?;
         config.validate()?;
         
         Ok(config)
@@ -191,11 +208,28 @@ impl Config {
         Ok(())
     }
     
+    fn set_platform_specifics(&mut self) -> Result<()> {
+        let original_paths = self.collectors.file_monitor.watched_paths.clone();
+        self.collectors.file_monitor.filter_watched_paths_for_platform();
+        
+        // Log the filtering results
+        if original_paths.len() != self.collectors.file_monitor.watched_paths.len() {
+            let filtered_out: Vec<_> = original_paths.iter()
+                .filter(|p| !self.collectors.file_monitor.watched_paths.contains(p))
+                .collect();
+            println!("Platform-specific path filtering: Removed {} incompatible paths: {:?}", 
+                     filtered_out.len(), 
+                     filtered_out.iter().map(|p| p.display().to_string()).collect::<Vec<_>>());
+        }
+        
+        Ok(())
+    }
+
     fn validate(&self) -> Result<()> {
         if self.agent.collection_interval_ms == 0 {
             anyhow::bail!("Collection interval must be greater than 0");
         }
-        
+
         if self.agent.max_events_per_batch == 0 {
             anyhow::bail!("Max events per batch must be greater than 0");
         }
