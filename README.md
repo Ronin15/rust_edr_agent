@@ -131,16 +131,32 @@ grep -o "Risk: [0-9.]*" logs/edr-agent.log | sort | uniq -c
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│   Agent     │────│  Collectors  │────│   Events    │
-│   Core      │    │              │    │   System    │
-└─────────────┘    └──────────────┘    └─────────────┘
-       │                    │                   │
-       │                    │                   │
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│ Config Mgmt │    │   Storage    │    │  Network    │
-│             │    │   Manager    │    │  Manager    │
-└─────────────┘    └──────────────┘    └─────────────┘
+                  ┌─────────────────────────────┐
+                  │        Agent Core           │
+                  │  (Orchestration & Control)  │
+                  └─────────────┬───────────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          │                     │                     │
+          ▼                     ▼                     ▼
+  ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+  │  Collectors   │     │   Detectors   │     │    Events     │
+  │   Manager     │     │   Manager     │     │    System     │
+  └───────┬───────┘     └───────┬───────┘     └───────┬───────┘
+          │                     │                     │
+      ┌───┼───┐             ┌───┼───┐             ┌───┼───┐
+      │   │   │             │   │   │             │   │   │
+      ▼   ▼   ▼             ▼   ▼   ▼             ▼   ▼   ▼
+  ┌────┐┌──┐┌───┐       ┌─────┐┌───┐         ┌─────┐┌─────┐
+  │Proc││FS││Net│       │Injec││...│         │Batch││Queue│
+  │Mon ││  ││Mon│       │ Det ││   │         │Proc ││     │
+  └────┘└──┘└───┘       └─────┘└───┘         └─────┘└─────┘
+
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+  │   Config    │     │   Storage   │     │   Network   │
+  │ Management  │     │  (Compress) │     │  (Remote)   │
+  │             │     │  + Cleanup  │     │   [STUB]    │
+  └─────────────┘     └─────────────┘     └─────────────┘
 ```
 
 ### Core Components
@@ -155,21 +171,45 @@ grep -o "Risk: [0-9.]*" logs/edr-agent.log | sort | uniq -c
 ## 🔧 Development
 
 ### Project Structure
+
+#### Source Code (`src/`)
 ```
 src/
-├── edr_main.rs          # Application entry point
-├── agent.rs             # Core agent implementation (COMPLETE)
-├── config.rs            # Configuration management (COMPLETE)
-├── events.rs            # Event types and handling (COMPLETE)
-├── storage.rs           # Local storage with compression (COMPLETE)
-├── network.rs           # Network communication (STUB)
-├── utils.rs             # Utility functions (COMPLETE)
-└── collectors/          # Monitoring modules
-    ├── collectors.rs    # Collector management (COMPLETE)
-    ├── process.rs       # Process monitoring (COMPLETE)
-    ├── file.rs          # File system monitoring (COMPLETE)
-    ├── network.rs       # Network monitoring (COMPLETE)
-    └── registry.rs      # Registry monitoring (PARTIAL)
+├── bin/
+│   └── test_integration.rs        # Integration test binary
+├── collectors/                    # Data collection modules
+│   ├── manager.rs                 # Collector orchestration (COMPLETE)
+│   ├── process.rs                 # Process monitoring (COMPLETE)
+│   ├── file.rs                    # File system monitoring (COMPLETE)
+│   ├── network.rs                 # Network monitoring (COMPLETE)
+│   └── registry.rs                # Registry monitoring (PARTIAL)
+├── detectors/                     # Threat detection modules
+│   ├── manager.rs                 # Detection engine manager (COMPLETE)
+│   ├── injection.rs               # Process injection detection (COMPLETE)
+│   └── injection/
+│       └── types.rs               # Injection detection types (COMPLETE)
+├── edr_main.rs                    # Application entry point
+├── lib.rs                         # Library exports and module definitions
+├── agent.rs                       # Core agent implementation (COMPLETE)
+├── config.rs                      # Configuration management (COMPLETE)
+├── events.rs                      # Event types and handling (COMPLETE)
+├── storage.rs                     # Local storage with compression (COMPLETE)
+├── network.rs                     # Network communication (STUB)
+├── utils.rs                       # Utility functions (COMPLETE)
+└── config.yaml                    # Default configuration template
+```
+
+#### Documentation (`docs/`)
+```
+docs/
+├── ADVANCED_DETECTION_ENGINE.md    # Detection engine documentation
+├── COMPRESSION.md                  # Storage compression guide
+├── DETAILED_USAGE.md              # Comprehensive usage guide
+├── DETECTION_CONFIGURATION.md     # Detection system configuration
+├── DETECTION_QUICK_REFERENCE.md   # Quick detection setup
+├── PERFORMANCE.md                 # Performance analysis
+├── TODO.md                        # Development roadmap
+└── USAGE.md                       # Basic usage guide
 ```
 
 ### Building for Development
