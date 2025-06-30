@@ -39,7 +39,7 @@ collectors:
     - HKEY_LOCAL_MACHINE\SOFTWARE\Classes
     - HKEY_LOCAL_MACHINE\SAM
 detectors:
-  injection:
+  behavioral:
     enabled: true
     scan_interval_ms: 2000
     alert_threshold: 0.4
@@ -70,6 +70,14 @@ detectors:
       firefox:
         max_alerts_per_hour: 8
         cooldown_multiplier: 0.3
+    path_context_rules: {}
+    network_behavior_rules: {}
+    time_based_risk_adjustment:
+      business_hours_multiplier: 1.0
+      after_hours_multiplier: 1.2
+      weekend_multiplier: 1.1
+      business_hours_start: 9
+      business_hours_end: 17
   registry_monitor:
     enabled: true
     watched_keys:
