@@ -10,6 +10,8 @@ use crate::agent::CollectorStatus;
 use super::process::ProcessCollector;
 use super::file::FileCollector;
 use super::network::NetworkCollector;
+
+#[cfg(windows)]
 use super::registry::RegistryCollector;
 
 // Enum to hold different collector types instead of trait objects
@@ -18,6 +20,8 @@ pub enum CollectorInstance {
     Process(ProcessCollector),
     File(FileCollector),
     Network(NetworkCollector),
+    
+    #[cfg(windows)]
     Registry(RegistryCollector),
 }
 
@@ -27,6 +31,8 @@ impl CollectorInstance {
             CollectorInstance::Process(c) => c.start().await,
             CollectorInstance::File(c) => c.start().await,
             CollectorInstance::Network(c) => c.start().await,
+            
+            #[cfg(windows)]
             CollectorInstance::Registry(c) => c.start().await,
         }
     }
@@ -36,6 +42,8 @@ impl CollectorInstance {
             CollectorInstance::Process(c) => c.stop().await,
             CollectorInstance::File(c) => c.stop().await,
             CollectorInstance::Network(c) => c.stop().await,
+            
+            #[cfg(windows)]
             CollectorInstance::Registry(c) => c.stop().await,
         }
     }
@@ -45,6 +53,8 @@ impl CollectorInstance {
             CollectorInstance::Process(c) => c.is_running().await,
             CollectorInstance::File(c) => c.is_running().await,
             CollectorInstance::Network(c) => c.is_running().await,
+            
+            #[cfg(windows)]
             CollectorInstance::Registry(c) => c.is_running().await,
         }
     }
@@ -54,6 +64,8 @@ impl CollectorInstance {
             CollectorInstance::Process(c) => c.get_status().await,
             CollectorInstance::File(c) => c.get_status().await,
             CollectorInstance::Network(c) => c.get_status().await,
+            
+            #[cfg(windows)]
             CollectorInstance::Registry(c) => c.get_status().await,
         }
     }
@@ -63,6 +75,8 @@ impl CollectorInstance {
             CollectorInstance::Process(c) => c.name(),
             CollectorInstance::File(c) => c.name(),
             CollectorInstance::Network(c) => c.name(),
+            
+            #[cfg(windows)]
             CollectorInstance::Registry(c) => c.name(),
         }
     }
