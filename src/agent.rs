@@ -338,13 +338,18 @@ impl Agent {
     pub async fn shutdown(&self) {
         info!("Shutting down EDR Agent");
         
-        // Mark as not running
+        // Mark as not running - this stops collectors from generating new events
         *self.is_running.write().await = false;
         
-        // Stop collectors
+        // Stop collectors (signals them to stop, doesn't force immediate termination)
+        info!("Stopping collectors...");
         if let Err(e) = self.collector_manager.stop().await {
             error!("Error stopping collectors: {}", e);
         }
+        
+        // Wait a moment for collectors to finish their current work
+        info!("Waiting for collectors to finish current operations...");
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         
         // Stop detectors
         if let Err(e) = self.detector_manager.stop().await {
