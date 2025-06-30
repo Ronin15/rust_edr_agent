@@ -157,7 +157,7 @@ ps -o pid,rss,vsz,pcpu,pmem,comm -p $(pgrep edr-agent)
 du -sh data/ && ls -la data/ | wc -l
 
 # Monitor compression efficiency
-find data/ -name "*.gz" -exec sh -c 'original=$(zcat "$1" | wc -c); compressed=$(stat -f%z "$1" 2>/dev/null || stat -c%s "$1"); echo "$(basename "$1"): $((100 - compressed * 100 / original))% compression"' _ {} \;
+find data/ -name "*.gz" -exec sh -c 'original=$(gunzip -c "$1" | wc -c); compressed=$(stat -f%z "$1" 2>/dev/null || stat -c%s "$1"); echo "$(basename "$1"): $((100 - compressed * 100 / original))% compression"' _ {} \;
 ```
 
 ### Performance Alerts

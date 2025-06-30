@@ -35,13 +35,13 @@ tail logs/*.log       # See log output
 ls -lt data/
 
 # View latest event file with pretty formatting
-ls data/events_*.json.gz | tail -1 | xargs zcat | jq .
+ls data/events_*.json.gz | tail -1 | xargs gunzip -c | jq .
 
 # Count total events
-zcat data/*.json.gz | jq '.events | length' | paste -sd+ | bc
+gunzip -c data/*.json.gz | jq '.events | length' | paste -sd+ | bc
 
 # Search for specific process
-zcat data/*.json.gz | jq '.events[] | select(.data.Process.name == "cargo")'
+gunzip -c data/*.json.gz | jq '.events[] | select(.data.Process.name == "cargo")'
 ```
 
 ### Monitor in Real-Time
@@ -59,13 +59,13 @@ RUST_LOG=debug cargo run | grep ERROR
 ### Analyze Activity
 ```bash
 # Find all process names seen
-zcat data/*.json.gz | jq -r '.events[].data.Process.name' | sort | uniq
+gunzip -c data/*.json.gz | jq -r '.events[].data.Process.name' | sort | uniq
 
 # Show events by type
-zcat data/*.json.gz | jq -r '.events[].event_type' | sort | uniq -c
+gunzip -c data/*.json.gz | jq -r '.events[].event_type' | sort | uniq -c
 
 # Find high memory usage processes
-zcat data/*.json.gz | jq '.events[] | select(.data.Process.memory_usage > 100000000)'
+gunzip -c data/*.json.gz | jq '.events[] | select(.data.Process.memory_usage > 100000000)'
 ```
 
 ## ⚙️ Configuration Quick Reference

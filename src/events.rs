@@ -34,6 +34,7 @@ pub enum EventType {
     SystemShutdown,
     UserLogin,
     UserLogout,
+    SecurityAlert,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +208,7 @@ impl Event {
             | EventType::RegistryKeyDeleted => EventSeverity::Medium,
             EventType::UserLogin | EventType::UserLogout => EventSeverity::High,
             EventType::SystemBoot | EventType::SystemShutdown => EventSeverity::High,
+            EventType::SecurityAlert => EventSeverity::Critical,
             _ => EventSeverity::Low,
         }
     }

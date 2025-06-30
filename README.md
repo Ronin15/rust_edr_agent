@@ -13,15 +13,22 @@ This project serves as a:
 - Demonstration of async/await patterns in security tools
 - Test bed for cross-platform monitoring capabilities
 
-## 🚀 Features (In Development)
+## 🚀 Features
 
+### Core Monitoring
 - **Process Monitoring**: Track process creation, termination, and behavior changes
 - **File System Monitoring**: Real-time file system event detection with file hashing
 - **Network Monitoring**: Network connection and DNS query tracking
 - **Registry Monitoring**: Windows registry change detection (currently support is planned)
 - **Cross-Platform Support**: Designed for Windows, Linux, and macOS
-- **High Performance**: ~80 MB memory footprint with 90%+ event compression
+- **High Performance**: ~120 MB memory footprint with 90%+ event compression
 - **Configurable**: YAML-based configuration with reasonable defaults
+
+### 🎯 Advanced Detection Engine (NEW)
+- **🔍 Cross-Platform Process Injection Detection**: Real-time detection of suspicious process names and file operations
+- **🧠 Context-Aware Risk Scoring**: Dynamic risk adjustment based on process location and expected system behavior
+- **⚡ Frequency-Based Alert Suppression**: Progressive risk reduction for repeated alerts to minimize false positives
+- **🛡️ System Process Context Recognition**: Baseline understanding of legitimate macOS/Windows/Linux system processes
 
 ## 📋 Current Implementation Status
 
@@ -80,8 +87,16 @@ Edit `config.yaml` to customize the agent behavior:
 
 For comprehensive documentation, see the `/docs` directory:
 
+### Getting Started
 - **[Quick Usage Guide](docs/USAGE.md)** - Get started in 30 seconds
 - **[Detailed Usage](docs/DETAILED_USAGE.md)** - In-depth usage instructions
+
+### Advanced Features
+- **[Detection Quick Reference](docs/DETECTION_QUICK_REFERENCE.md)** - ⚡ Fast setup and troubleshooting
+- **[Advanced Detection Engine](docs/ADVANCED_DETECTION_ENGINE.md)** - Context-aware threat detection
+- **[Detection Configuration](docs/DETECTION_CONFIGURATION.md)** - Tuning and customization guide
+
+### System Management
 - **[Storage Compression](docs/COMPRESSION.md)** - Compression and storage management
 - **[Performance Analysis](docs/PERFORMANCE.md)** - Memory usage and performance metrics
 - **[TODO List](docs/TODO.md)** - Future enhancements and planned features
@@ -98,6 +113,19 @@ ls -la && ps aux
 # 3. Check results
 ls data/          # Event files
 tail logs/*.log   # Log output
+```
+
+### Detection Engine Test
+```bash
+# 1. Run agent with detection enabled
+./target/release/edr-agent
+
+# 2. Watch for security alerts in real-time
+tail -f logs/edr-agent.log | grep "SECURITY ALERT"
+
+# 3. View detection statistics
+grep "SECURITY ALERT" logs/edr-agent.log | wc -l
+grep -o "Risk: [0-9.]*" logs/edr-agent.log | sort | uniq -c
 ```
 
 ## 🏗️ Architecture

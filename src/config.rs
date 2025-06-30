@@ -6,6 +6,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub agent: AgentConfig,
     pub collectors: CollectorsConfig,
+    pub detectors: DetectorsConfig,
     pub storage: StorageConfig,
     pub network: NetworkConfig,
     pub logging: LoggingConfig,
@@ -59,6 +60,25 @@ pub struct NetworkMonitorConfig {
 pub struct RegistryMonitorConfig {
     pub enabled: bool,
     pub watched_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DetectorsConfig {
+    pub injection: ProcessInjectionConfig,
+    // pub malware_detector: MalwareDetectorConfig,
+    // pub anomaly_detector: AnomalyDetectorConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProcessInjectionConfig {
+    pub enabled: bool,
+    pub scan_interval_ms: u64,
+    pub alert_threshold: f32,
+    pub prevention_threshold: f32,
+    pub track_api_calls: bool,
+    pub monitor_memory_operations: bool,
+    pub monitor_thread_operations: bool,
+    pub cross_platform_detection: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +246,18 @@ impl Default for Config {
                         "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
                         "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
                     ],
+                },
+            },
+            detectors: DetectorsConfig {
+                injection: ProcessInjectionConfig {
+                    enabled: true,
+                    scan_interval_ms: 2000,
+                    alert_threshold: 0.6,
+                    prevention_threshold: 0.8,
+                    track_api_calls: true,
+                    monitor_memory_operations: true,
+                    monitor_thread_operations: true,
+                    cross_platform_detection: true,
                 },
             },
             storage: StorageConfig {

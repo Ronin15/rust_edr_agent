@@ -49,7 +49,8 @@ storage:
 # Size: 45,248 bytes (compressed from 573,820 bytes)
 
 # To view content:
-zcat data/events_*.json.gz | jq .
+gunzip -c data/events_*.json.gz | jq .
+# Alternative (Linux/some systems): zcat data/events_*.json.gz | jq .
 ```
 
 ### Log Output
@@ -62,17 +63,19 @@ INFO edr_agent::storage: Cleanup completed: removed 5 files, freed 2048000 bytes
 
 ### Command Line Tools
 ```bash
-# View compressed file
-zcat data/events_*.json.gz | jq .
+# View compressed file (cross-platform)
+gunzip -c data/events_*.json.gz | jq .
 
 # Search across all compressed files
-zcat data/*.json.gz | jq '.events[] | select(.event_type == "ProcessCreated")'
+gunzip -c data/*.json.gz | jq '.events[] | select(.event_type == "ProcessCreated")'
 
 # Count total events in all files
-zcat data/*.json.gz | jq '.events | length' | paste -sd+ | bc
+gunzip -c data/*.json.gz | jq '.events | length' | paste -sd+ | bc
 
 # Extract specific data
-zcat data/*.json.gz | jq -r '.events[].data.Process.name' | sort | uniq
+gunzip -c data/*.json.gz | jq -r '.events[].data.Process.name' | sort | uniq
+
+# Note: On Linux systems, you can also use 'zcat' instead of 'gunzip -c'
 ```
 
 ### Programming Integration
@@ -92,7 +95,7 @@ let events: EventBatch = serde_json::from_str(&contents)?;
 
 ### Unix/Linux/macOS
 - Uses standard `gzip` compression
-- Compatible with system tools (`zcat`, `gunzip`)
+- Compatible with system tools (`gunzip -c`, `zcat` on Linux)
 - Preserves file permissions and timestamps
 
 ### Windows
@@ -118,11 +121,11 @@ watch -n 5 'du -sh data/ && ls -la data/ | tail -3'
 ### Performance Metrics
 ```bash
 # Time compression performance
-time zcat data/events_*.json.gz > /dev/null
+time gunzip -c data/events_*.json.gz > /dev/null
 
 # Check compression ratio
 for f in data/*.json.gz; do
-    original=$(zcat "$f" | wc -c)
+    original=$(gunzip -c "$f" | wc -c)
     compressed=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f")
     ratio=$(echo "scale=2; (1 - $compressed/$original) * 100" | bc)
     echo "$f: ${ratio}% compression"

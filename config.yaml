@@ -33,6 +33,16 @@ collectors:
     watched_keys:
     - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
     - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+detectors:
+  injection:
+    enabled: true
+    scan_interval_ms: 2000
+    alert_threshold: 0.4  # Lowered to catch more context-adjusted alerts
+    prevention_threshold: 0.8
+    track_api_calls: true
+    monitor_memory_operations: true
+    monitor_thread_operations: true
+    cross_platform_detection: true
 storage:
   local_storage:
     enabled: true

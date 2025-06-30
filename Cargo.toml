@@ -77,6 +77,10 @@ mockall = "0.12"
 name = "edr-agent"
 path = "src/edr_main.rs"
 
+[[bin]]
+name = "test_integration"
+path = "src/bin/test_integration.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1

@@ -124,7 +124,7 @@ To see the agent detect real system activity:
    ls -la data/ | tail -5
    
    # Examine an event file
-   zcat data/events_*.json.gz | jq .
+   gunzip -c data/events_*.json.gz | jq .
    
    # Monitor logs
    tail -f logs/*.log

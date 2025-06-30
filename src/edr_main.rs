@@ -6,6 +6,7 @@ use tokio::signal;
 mod config;
 mod agent;
 mod collectors;
+mod detectors;
 mod events;
 mod storage;
 mod network;
