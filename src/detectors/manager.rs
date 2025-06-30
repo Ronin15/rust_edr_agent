@@ -16,7 +16,7 @@ pub struct DetectorStatus {
     pub cpu_usage_percent: f32,
 }
 
-use super::injection::InjectionDetector;
+use super::behavioral::BehavioralDetector;
 
 #[cfg(windows)]
 use super::registry::RegistryDetector;
@@ -24,7 +24,7 @@ use super::registry::RegistryDetector;
 // Enum to hold different detector types
 #[derive(Debug)]
 pub enum DetectorInstance {
-    Injection(InjectionDetector),
+    Behavioral(BehavioralDetector),
     
     #[cfg(windows)]
     Registry(RegistryDetector),
@@ -36,7 +36,7 @@ pub enum DetectorInstance {
 impl DetectorInstance {
     pub async fn start(&self) -> Result<()> {
         match self {
-            DetectorInstance::Injection(d) => d.start().await,
+            DetectorInstance::Behavioral(d) => d.start().await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.start().await,
@@ -45,7 +45,7 @@ impl DetectorInstance {
     
     pub async fn stop(&self) -> Result<()> {
         match self {
-            DetectorInstance::Injection(d) => d.stop().await,
+            DetectorInstance::Behavioral(d) => d.stop().await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.stop().await,
@@ -54,7 +54,7 @@ impl DetectorInstance {
     
     pub async fn is_running(&self) -> bool {
         match self {
-            DetectorInstance::Injection(d) => d.is_running().await,
+            DetectorInstance::Behavioral(d) => d.is_running().await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.is_running().await,
@@ -63,7 +63,7 @@ impl DetectorInstance {
     
     pub async fn get_status(&self) -> DetectorStatus {
         match self {
-            DetectorInstance::Injection(d) => d.get_status().await,
+            DetectorInstance::Behavioral(d) => d.get_status().await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.get_status().await,
@@ -72,7 +72,7 @@ impl DetectorInstance {
     
     pub fn name(&self) -> &'static str {
         match self {
-            DetectorInstance::Injection(d) => d.name(),
+            DetectorInstance::Behavioral(d) => d.name(),
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.name(),
@@ -81,7 +81,7 @@ impl DetectorInstance {
     
     pub async fn process_event(&self, event: &Event) -> Result<()> {
         match self {
-            DetectorInstance::Injection(d) => d.process_event(event).await,
+            DetectorInstance::Behavioral(d) => d.process_event(event).await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.process_event(event).await,
@@ -151,16 +151,16 @@ impl DetectorManager {
     ) -> Result<Self> {
         let mut detectors: Vec<DetectorInstance> = Vec::new();
         
-        // Initialize injection detector
-        if config.injection.enabled {
-            info!("Initializing injection detector");
-            let detector = InjectionDetector::new(
-                config.injection.clone(),
+        // Initialize behavioral detector
+        if config.behavioral.enabled {
+            info!("Initializing behavioral detector");
+            let detector = BehavioralDetector::new(
+                config.behavioral.clone(),
                 alert_sender.clone(),
                 agent_id.clone(),
                 hostname.clone(),
             ).await?;
-            detectors.push(DetectorInstance::Injection(detector));
+            detectors.push(DetectorInstance::Behavioral(detector));
         }
         
         // Initialize registry detector (Windows only)

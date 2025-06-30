@@ -85,6 +85,10 @@ path = "src/edr_main.rs"
 name = "test_integration"
 path = "src/bin/test_integration.rs"
 
+[[bin]]
+name = "test_linux_detection"
+path = "test_linux_context.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1

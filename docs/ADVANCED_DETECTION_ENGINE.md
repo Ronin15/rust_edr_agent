@@ -1,32 +1,45 @@
-# Advanced Detection Engine
+# Behavioral Detection Engine
 
 ## Overview
 
-The EDR Agent now includes advanced detection capabilities focused on reducing false positives and enhancing context-aware monitoring.
+The EDR Agent features a sophisticated Behavioral Detection Engine that monitors threats across multiple dimensions using platform-aware detection rules. This engine replaced the previous "injection detector" to provide comprehensive behavioral threat analysis.
 
 ## Features
 
-### 🔍 Cross-Platform Process Injection Detection
-- **Real-time detection** of suspicious process names and file operations.
-- Monitors for unusual process behavior and path anomalies.
+### 🔍 Multi-Vector Threat Detection
+- **Process Injection Detection**: Linux ptrace sequences, Windows DLL injection, macOS task port manipulation
+- **Malicious Shell Activity**: Shell execution from suspicious locations, browser-spawned shells, unusual parent processes
+- **Library Loading Attacks**: .so injection on Linux, DLL sideloading on Windows, dylib attacks on macOS
+- **Suspicious File Operations**: Executable files in temp directories, browser cache execution
+- **Command Line Analysis**: Platform-specific suspicious command patterns
+
+### 🐧 Linux-Specific Detection Capabilities
+- **ptrace Injection Monitoring**: Detects `ptrace` → `mmap` → `mprotect` attack sequences
+- **Shared Library Attacks**: Monitors for malicious `.so` file loading and `LD_PRELOAD` abuse
+- **Shell Execution Analysis**: Detects shells running from `/tmp/`, `/dev/shm/`, browser cache directories
+- **System Process Context**: Validates `systemd` and `init` process execution contexts
+- **Command Line Patterns**: Monitors for suspicious patterns like `base64`, `ptrace`, `LD_PRELOAD`, `nc -l`
 
 ### 🧠 Context-Aware Risk Scoring
-- Dynamic risk adjustment based on:
-  - Process execution location.
-  - Ancestry and parent-child relationships.
-- Helps identify legitimate vs unauthorized system activities.
+- **Dynamic risk adjustment** based on:
+  - Process execution location and expected paths
+  - Process ancestry and parent-child relationships
+  - System process validation (legitimate vs impersonated)
+- **Platform-adaptive scoring** that understands OS-specific behaviors
+- Helps identify legitimate vs unauthorized system activities
 
 ### ⚡ Frequency-Based Alert Suppression
-- Suppresses duplicate alerts for recurring benign activities.
-- Reduces alert fatigue and highlights genuine threats.
-- Utilizes a cooldown multiplier to gradually reduce alert risk.
+- **Progressive risk reduction** for repeated alerts to minimize false positives
+- **Cooldown multipliers** that gradually reduce alert severity for known patterns
+- **Per-process type limits** to prevent alert storms from legitimate system activity
 
 ### 🛡️ System Process Context Recognition
-- Profiles known system processes to differentiate between normal and suspicious activity.
-- Incorporates baseline rules for 
-  - macOS (`mdworker_shared`, `sharingd`)
-  - Windows (`svchost`, `explorer`)
-  - Linux (`systemd`, `init`)
+- **Cross-platform system process profiles**:
+  - **Linux**: `systemd`, `init` with expected path validation
+  - **macOS**: `mdworker_shared`, `sharingd`, `ReportCrash`
+  - **Windows**: System processes (when running on Windows)
+- **Expected path validation** with elevated risk for processes in wrong locations
+- **Instance count monitoring** to detect process impersonation
 
 ## Configuration
 

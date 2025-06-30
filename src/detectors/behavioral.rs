@@ -10,12 +10,12 @@ use tokio::sync::mpsc;
 use crate::events::{Event, EventData, ProcessEventData, FileEventData, NetworkEventData};
 use crate::detectors::{Detector, EventDetector, DetectorAlert, AlertSeverity};
 use crate::detectors::DetectorStatus;
-use crate::config::ProcessInjectionConfig;
+use crate::config::BehavioralDetectorConfig;
 
-// Cross-platform injection detector
+// Cross-platform behavioral threat detector
 #[derive(Debug)]
-pub struct InjectionDetector {
-    config: ProcessInjectionConfig,
+pub struct BehavioralDetector {
+    config: BehavioralDetectorConfig,
     alert_sender: mpsc::Sender<DetectorAlert>,
     process_tracker: Arc<RwLock<ProcessTracker>>,
     detection_rules: DetectionRules,
@@ -156,9 +156,9 @@ pub struct TimeWindowRule {
     pub risk_score: f32,
 }
 
-impl InjectionDetector {
+impl BehavioralDetector {
     pub async fn new(
-        config: ProcessInjectionConfig,
+        config: BehavioralDetectorConfig,
         alert_sender: mpsc::Sender<DetectorAlert>,
         agent_id: String,
         hostname: String,
@@ -182,7 +182,7 @@ impl InjectionDetector {
         let mut api_weights = HashMap::new();
         let mut sequence_patterns = Vec::new();
         let mut suspicious_paths = Vec::new();
-        let mut suspicious_processes = Vec::new();
+        let suspicious_processes = Vec::new();
         
         // Cross-platform suspicious APIs and patterns
         api_weights.insert("dlopen".to_string(), 0.3);
@@ -198,14 +198,8 @@ impl InjectionDetector {
             "/var/tmp/".to_string(),
         ]);
         
-        // Cross-platform suspicious processes (when in unexpected locations)
-        suspicious_processes.extend([
-            "bash".to_string(),
-            "sh".to_string(),
-            "python".to_string(),
-            "perl".to_string(),
-            "ruby".to_string(),
-        ]);
+        // Focus on truly suspicious execution contexts rather than common process names
+        // We'll check these in behavioral context analysis instead
         
         #[cfg(windows)]
         {
@@ -326,6 +320,30 @@ impl InjectionDetector {
             elevated_risk_multiplier: 4.0, // Very suspicious if in wrong location
         });
         
+        // Linux system processes
+        system_process_contexts.insert("systemd".to_string(), SystemProcessContext {
+            expected_paths: vec![
+                "/lib/systemd/".to_string(),
+                "/usr/lib/systemd/".to_string(),
+                "/bin/".to_string(),
+                "/sbin/".to_string(),
+            ],
+            max_instances: 50, // systemd can have many processes
+            baseline_risk_reduction: 0.8, // 80% risk reduction when in expected context
+            elevated_risk_multiplier: 3.0, // 3x risk when in unexpected context
+        });
+        
+        system_process_contexts.insert("init".to_string(), SystemProcessContext {
+            expected_paths: vec![
+                "/sbin/".to_string(),
+                "/bin/".to_string(),
+                "/usr/sbin/".to_string(),
+            ],
+            max_instances: 1, // Only one init process should exist
+            baseline_risk_reduction: 0.9, // 90% risk reduction when in expected context
+            elevated_risk_multiplier: 5.0, // Very suspicious if in wrong location
+        });
+        
         // Alert frequency limits
         let mut alert_frequency_limits = HashMap::new();
         
@@ -400,43 +418,72 @@ impl InjectionDetector {
         // Move mutable usage of tracker here
         let process_name = process_state.name.clone();
         let process_path = process_state.path.clone();
+        let parent_pid = process_state.parent_pid;
         
         // Check for suspicious process characteristics using context-aware scoring
         let mut alerts = Vec::new();
 
-        // Check suspicious process name/path with context awareness
-        if self.is_suspicious_process_name(&process_name) {
-            let base_risk = 0.5;
-            let adjusted_risk = self.calculate_context_aware_risk(
-                &process_name, 
-                &process_path, 
-                base_risk
-            );
+        // Linux-specific behavioral detection
+        #[cfg(target_os = "linux")]
+        {
+            // Check for shells/interpreters launched from unexpected parents or locations
+            if self.is_shell_or_interpreter(&process_name) {
+                if let Some(alert) = self.check_suspicious_shell_execution(
+                    tracker, pid, &process_name, &process_path, parent_pid
+                ) {
+                    alerts.push(alert);
+                }
+            }
             
-            // Check frequency limits
-            let (should_suppress, severity_multiplier) = self.should_suppress_alert(
-                tracker, 
-                &process_name
-            );
-
-            if !should_suppress {
-                let final_risk = adjusted_risk * severity_multiplier;
-                let severity = if final_risk >= 0.7 {
-                    AlertSeverity::High
-                } else if final_risk >= 0.4 {
-                    AlertSeverity::Medium
-                } else {
-                    AlertSeverity::Low
-                };
-
+            // Check for processes running from browser cache/temp directories
+            if self.is_browser_cache_execution(&process_path) {
                 alerts.push(self.create_alert(
                     InjectionEventType::SuspiciousProcess,
-                    severity,
-                    format!("Suspicious process name: {}", process_name),
-                    format!("Process {} (PID: {}) has a suspicious name", process_name, pid),
-                    final_risk,
+                    AlertSeverity::High,
+                    "Process execution from browser cache".to_string(),
+                    format!("Process {} (PID: {}) executed from browser cache: {}", 
+                        process_name, pid, process_path),
+                    0.8,
                     vec![pid],
                 ));
+            }
+        }
+        
+        // Windows detection (kept for reference)
+        #[cfg(windows)]
+        {
+            if self.is_suspicious_process_name(&process_name) {
+                let base_risk = 0.5;
+                let adjusted_risk = self.calculate_context_aware_risk(
+                    &process_name, 
+                    &process_path, 
+                    base_risk
+                );
+                
+                let (should_suppress, severity_multiplier) = self.should_suppress_alert(
+                    tracker, 
+                    &process_name
+                );
+
+                if !should_suppress {
+                    let final_risk = adjusted_risk * severity_multiplier;
+                    let severity = if final_risk >= 0.7 {
+                        AlertSeverity::High
+                    } else if final_risk >= 0.4 {
+                        AlertSeverity::Medium
+                    } else {
+                        AlertSeverity::Low
+                    };
+
+                    alerts.push(self.create_alert(
+                        InjectionEventType::SuspiciousProcess,
+                        severity,
+                        format!("Suspicious process name: {}", process_name),
+                        format!("Process {} (PID: {}) has a suspicious name", process_name, pid),
+                        final_risk,
+                        vec![pid],
+                    ));
+                }
             }
         }
         
@@ -557,6 +604,26 @@ impl InjectionDetector {
     }
 
     fn check_command_line_patterns(&self, pid: u32, process_name: &str, command_line: &str) -> Option<DetectorAlert> {
+        // Platform-specific suspicious command line patterns
+        #[cfg(target_os = "linux")]
+        let suspicious_patterns = [
+            ("base64", 0.5),
+            ("encoded", 0.5),
+            ("/dev/shm", 0.8),
+            ("/tmp/", 0.6),
+            ("chmod +x", 0.7),
+            ("curl", 0.4),
+            ("wget", 0.4),
+            ("ptrace", 0.7),
+            ("LD_PRELOAD", 0.8),
+            ("dd if=", 0.5),
+            ("nc -l", 0.6),  // netcat listener
+            ("python -c", 0.5),
+            ("perl -e", 0.5),
+            ("bash -i", 0.6),  // interactive bash
+        ];
+        
+        #[cfg(windows)]
         let suspicious_patterns = [
             ("powershell", 0.6),
             ("rundll32", 0.7),
@@ -567,11 +634,18 @@ impl InjectionDetector {
             ("certutil", 0.7),
             ("base64", 0.5),
             ("encoded", 0.5),
-            ("/dev/shm", 0.8),
+        ];
+        
+        #[cfg(target_os = "macos")]
+        let suspicious_patterns = [
+            ("base64", 0.5),
+            ("encoded", 0.5),
             ("/tmp/", 0.6),
             ("chmod +x", 0.7),
             ("curl", 0.4),
-            ("wget", 0.4),
+            ("python -c", 0.5),
+            ("perl -e", 0.5),
+            ("bash -i", 0.6),
         ];
         
         let cmd_lower = command_line.to_lowercase();
@@ -598,21 +672,45 @@ impl InjectionDetector {
     }
 
     fn is_suspicious_file_location(&self, path: &str) -> bool {
+        #[cfg(target_os = "linux")]
         let suspicious_locations = [
             "/tmp/",
             "/dev/shm/",
             "/var/tmp/",
+            "/run/user/*/",  // User runtime directories
+        ];
+        
+        #[cfg(windows)]
+        let suspicious_locations = [
             "\\Windows\\Temp\\",
             "\\Users\\Public\\",
             "\\AppData\\Local\\Temp\\",
+            "\\ProgramData\\",
+        ];
+        
+        #[cfg(target_os = "macos")]
+        let suspicious_locations = [
+            "/tmp/",
+            "/var/tmp/",
+            "/private/tmp/",
         ];
         
         suspicious_locations.iter().any(|&location| path.contains(location))
     }
 
     fn is_executable_file(&self, path: &str) -> bool {
-        let executable_extensions = [".exe", ".dll", ".so", ".dylib", ".bin", ".out"];
-        executable_extensions.iter().any(|&ext| path.to_lowercase().ends_with(ext))
+        #[cfg(target_os = "linux")]
+        let executable_extensions = [".so", ".bin", ".out", ".elf"];
+        
+        #[cfg(windows)]
+        let executable_extensions = [".exe", ".dll", ".com", ".scr", ".bat", ".cmd"];
+        
+        #[cfg(target_os = "macos")]
+        let executable_extensions = [".dylib", ".bin", ".out", ".app"];
+        
+        executable_extensions.iter().any(|&ext| path.to_lowercase().ends_with(ext)) ||
+        // Also check for files without extensions that might be executable
+        (cfg!(target_os = "linux") && !path.contains('.') && path.starts_with("/"))
     }
 
     fn is_suspicious_network_behavior(&self, network_data: &NetworkEventData) -> bool {
@@ -632,9 +730,29 @@ impl InjectionDetector {
         false
     }
 
-    fn is_suspicious_process_name(&self, name: &str) -> bool {
-        self.detection_rules.suspicious_processes.iter()
-            .any(|sus_name| name.to_lowercase().contains(&sus_name.to_lowercase()))
+    fn is_suspicious_process_name(&self, _name: &str) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            // Linux-specific behavioral detection
+            // Focus on processes that shouldn't be running in certain contexts
+            // We'll check the parent process and execution path in analyze_process_event
+            false // Context checking happens in analyze_process_event
+        }
+        
+        #[cfg(windows)]
+        {
+            // Windows suspicious processes (exact matches only)
+            let suspicious_names = [
+                "powershell.exe", "cmd.exe", "rundll32.exe", "regsvr32.exe",
+                "mshta.exe", "wscript.exe", "cscript.exe"
+            ];
+            suspicious_names.iter().any(|&sus_name| name.to_lowercase() == sus_name)
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            false // macOS behavioral detection
+        }
     }
 
     fn is_suspicious_process_path(&self, path: &str) -> bool {
@@ -769,6 +887,95 @@ impl InjectionDetector {
         alert
     }
 
+    // Linux-specific helper functions
+    #[cfg(target_os = "linux")]
+    fn is_shell_or_interpreter(&self, process_name: &str) -> bool {
+        let shells_and_interpreters = ["sh", "bash", "zsh", "fish", "dash", "python", "python3", "perl", "ruby", "node", "php"];
+        let name_lower = process_name.to_lowercase();
+        
+        // Check for exact matches or common naming patterns
+        shells_and_interpreters.iter().any(|&shell| {
+            name_lower == shell || 
+            name_lower.ends_with(&format!("/{}", shell)) ||
+            name_lower.starts_with(&format!("{}_", shell)) ||
+            name_lower.starts_with(&format!("{}-", shell))
+        })
+    }
+    
+    #[cfg(target_os = "linux")]
+    fn check_suspicious_shell_execution(
+        &self, 
+        tracker: &mut ProcessTracker, 
+        pid: u32, 
+        process_name: &str, 
+        process_path: &str, 
+        parent_pid: u32
+    ) -> Option<DetectorAlert> {
+        // Check if shell is launched from browser or unusual parent
+        if let Some(parent_process) = tracker.processes.get(&parent_pid) {
+            let parent_name = &parent_process.name;
+            
+            // Check for browsers launching shells
+            let browser_processes = ["firefox", "chrome", "chromium", "safari", "edge", "opera"];
+            if browser_processes.iter().any(|&browser| parent_name.to_lowercase().contains(browser)) {
+                return Some(self.create_alert(
+                    InjectionEventType::SuspiciousProcess,
+                    AlertSeverity::High,
+                    "Shell launched by browser".to_string(),
+                    format!("Shell {} (PID: {}) launched by browser process {} (PID: {})", 
+                        process_name, pid, parent_name, parent_pid),
+                    0.9,
+                    vec![pid, parent_pid],
+                ));
+            }
+            
+            // Check for unexpected parent processes
+            let unexpected_parents = ["steamwebhelper", "discord", "slack", "teams"];
+            if unexpected_parents.iter().any(|&parent| parent_name.to_lowercase().contains(parent)) {
+                return Some(self.create_alert(
+                    InjectionEventType::SuspiciousProcess,
+                    AlertSeverity::Medium,
+                    "Shell launched by unexpected parent".to_string(),
+                    format!("Shell {} (PID: {}) launched by {} (PID: {})", 
+                        process_name, pid, parent_name, parent_pid),
+                    0.7,
+                    vec![pid, parent_pid],
+                ));
+            }
+        }
+        
+        // Check for shells running from unusual locations
+        let suspicious_locations = ["/tmp/", "/dev/shm/", "/var/tmp/", "/.cache/", "/home/*/Downloads/"];
+        if suspicious_locations.iter().any(|&location| process_path.contains(location)) {
+            return Some(self.create_alert(
+                InjectionEventType::SuspiciousProcess,
+                AlertSeverity::High,
+                "Shell execution from suspicious location".to_string(),
+                format!("Shell {} (PID: {}) executing from suspicious location: {}", 
+                    process_name, pid, process_path),
+                0.8,
+                vec![pid],
+            ));
+        }
+        
+        None
+    }
+    
+    #[cfg(target_os = "linux")]
+    fn is_browser_cache_execution(&self, process_path: &str) -> bool {
+        let browser_cache_patterns = [
+            "/.cache/",
+            "/.mozilla/firefox/",
+            "/.config/google-chrome/",
+            "/.config/chromium/",
+            "/snap/firefox/common/.cache/",
+            "/tmp/mozilla_",
+            "/tmp/chrome_"
+        ];
+        
+        browser_cache_patterns.iter().any(|&pattern| process_path.contains(pattern))
+    }
+
     fn cleanup_old_events(&self, tracker: &mut ProcessTracker) {
         let cutoff_time = Instant::now() - Duration::from_secs(3600); // Keep 1 hour of events
         
@@ -783,15 +990,15 @@ impl InjectionDetector {
 }
 
 #[async_trait::async_trait]
-impl Detector for InjectionDetector {
+impl Detector for BehavioralDetector {
     async fn start(&self) -> Result<()> {
-        info!("Starting injection detector");
+        info!("Starting behavioral detector");
         *self.is_running.write().await = true;
         Ok(())
     }
     
     async fn stop(&self) -> Result<()> {
-        info!("Stopping injection detector");
+        info!("Stopping behavioral detector");
         *self.is_running.write().await = false;
         Ok(())
     }
@@ -873,12 +1080,12 @@ impl Detector for InjectionDetector {
     }
     
     fn name(&self) -> &'static str {
-        "injection_detector"
+        "behavioral_detector"
     }
 }
 
 #[async_trait::async_trait]
-impl EventDetector for InjectionDetector {
+impl EventDetector for BehavioralDetector {
     async fn analyze_event(&self, event: &Event) -> Result<Option<DetectorAlert>> {
         if !self.is_running().await {
             return Ok(None);
@@ -921,12 +1128,12 @@ impl ProcessTracker {
 mod tests {
     use super::*;
     use tokio::sync::mpsc;
-    use crate::config::ProcessInjectionConfig;
+    use crate::config::BehavioralDetectorConfig;
     use crate::events::builders;
     
     #[tokio::test]
-    async fn test_injection_detector_creation() {
-        let config = ProcessInjectionConfig {
+    async fn test_behavioral_detector_creation() {
+        let config = BehavioralDetectorConfig {
             enabled: true,
             scan_interval_ms: 1000,
             alert_threshold: 0.6,
@@ -935,11 +1142,16 @@ mod tests {
             monitor_memory_operations: true,
             monitor_thread_operations: true,
             cross_platform_detection: true,
+            system_process_contexts: HashMap::new(),
+            alert_frequency_limits: HashMap::new(),
+            path_context_rules: HashMap::new(),
+            network_behavior_rules: HashMap::new(),
+            time_based_risk_adjustment: Default::default(),
         };
         
         let (alert_sender, _) = mpsc::channel(100);
         
-        let detector = InjectionDetector::new(
+        let detector = BehavioralDetector::new(
             config,
             alert_sender,
             "test-agent".to_string(),
@@ -951,7 +1163,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_suspicious_process_detection() {
-        let config = ProcessInjectionConfig {
+        let config = BehavioralDetectorConfig {
             enabled: true,
             scan_interval_ms: 1000,
             alert_threshold: 0.6,
@@ -960,11 +1172,16 @@ mod tests {
             monitor_memory_operations: true,
             monitor_thread_operations: true,
             cross_platform_detection: true,
+            system_process_contexts: HashMap::new(),
+            alert_frequency_limits: HashMap::new(),
+            path_context_rules: HashMap::new(),
+            network_behavior_rules: HashMap::new(),
+            time_based_risk_adjustment: Default::default(),
         };
         
         let (alert_sender, mut alert_receiver) = mpsc::channel(100);
         
-        let detector = InjectionDetector::new(
+        let detector = BehavioralDetector::new(
             config,
             alert_sender,
             "test-agent".to_string(),
@@ -973,11 +1190,11 @@ mod tests {
         
         detector.start().await.unwrap();
         
-        // Create a suspicious process event
+        // Create a suspicious process event (Linux path)
         let event = builders::create_process_event(
             1234,
-            "powershell.exe".to_string(),
-            "\\Windows\\Temp\\powershell.exe".to_string(),
+            "bash".to_string(),
+            "/tmp/suspicious_bash".to_string(),
             "test-host".to_string(),
             "test-agent".to_string(),
         );

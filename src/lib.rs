@@ -21,7 +21,7 @@ pub mod collectors {
 }
 
 pub mod detectors {
-    pub mod injection;
+    pub mod behavioral;
     
     #[cfg(windows)]
     pub mod registry;

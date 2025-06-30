@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -92,14 +93,14 @@ impl Default for RegistryMonitorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DetectorsConfig {
-    pub injection: ProcessInjectionConfig,
+    pub behavioral: BehavioralDetectorConfig,
     pub registry_monitor: RegistryMonitorConfig,
     // pub malware_detector: MalwareDetectorConfig,
     // pub anomaly_detector: AnomalyDetectorConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ProcessInjectionConfig {
+pub struct BehavioralDetectorConfig {
     pub enabled: bool,
     pub scan_interval_ms: u64,
     pub alert_threshold: f32,
@@ -108,6 +109,16 @@ pub struct ProcessInjectionConfig {
     pub monitor_memory_operations: bool,
     pub monitor_thread_operations: bool,
     pub cross_platform_detection: bool,
+    #[serde(default)]
+    pub system_process_contexts: HashMap<String, SystemProcessContext>,
+    #[serde(default)]
+    pub alert_frequency_limits: HashMap<String, FrequencyLimit>,
+    #[serde(default)]
+    pub path_context_rules: HashMap<String, PathContextRule>,
+    #[serde(default)]
+    pub network_behavior_rules: HashMap<String, NetworkBehaviorRule>,
+    #[serde(default)]
+    pub time_based_risk_adjustment: TimeBasedRiskAdjustment,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,6 +259,131 @@ impl Config {
     }
 }
 
+// Config-compatible types that match injection detector expectations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemProcessContext {
+    pub expected_paths: Vec<String>,
+    pub max_instances: u32,
+    pub baseline_risk_reduction: f32,
+    pub elevated_risk_multiplier: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrequencyLimit {
+    pub max_alerts_per_hour: u32,
+    pub cooldown_multiplier: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertTimeWindows {
+    pub short_term_seconds: u64,   // 5 minutes
+    pub medium_term_seconds: u64,  // 30 minutes  
+    pub long_term_seconds: u64,    // 1 hour
+    pub max_alerts_short_term: u32,
+    pub max_alerts_medium_term: u32,
+    pub max_alerts_long_term: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathContextRule {
+    pub patterns: Vec<String>,
+    pub alert_threshold_multiplier: f32,
+    pub max_alerts_per_hour: u32,
+    pub context_type: PathContextType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PathContextType {
+    BrowserData,
+    SystemTemp,
+    UserCache,
+    SystemBinary,
+    UserDocument,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkBehaviorRule {
+    pub process_patterns: Vec<String>,
+    pub suspicious_network_threshold: f32,
+    pub max_network_alerts_per_hour: u32,
+    pub whitelisted_ports: Vec<u16>,
+    pub behavior_tolerance: NetworkToleranceLevel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NetworkToleranceLevel {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TimeBasedRiskAdjustment {
+    pub business_hours_multiplier: f32,
+    pub after_hours_multiplier: f32,
+    pub weekend_multiplier: f32,
+    pub business_hours_start: u8,  // 24-hour format
+    pub business_hours_end: u8,    // 24-hour format
+}
+
+// Default implementations that extend existing architecture
+impl Default for SystemProcessContext {
+    fn default() -> Self {
+        Self {
+            expected_paths: vec![],
+            max_instances: 5,
+            baseline_risk_reduction: 0.3,
+            elevated_risk_multiplier: 2.0,
+        }
+    }
+}
+
+impl Default for FrequencyLimit {
+    fn default() -> Self {
+        Self {
+            max_alerts_per_hour: 10,
+            cooldown_multiplier: 0.3,
+        }
+    }
+}
+
+
+impl Default for AlertTimeWindows {
+    fn default() -> Self {
+        Self {
+            short_term_seconds: 300,    // 5 minutes
+            medium_term_seconds: 1800,  // 30 minutes
+            long_term_seconds: 3600,    // 1 hour
+            max_alerts_short_term: 3,
+            max_alerts_medium_term: 8,
+            max_alerts_long_term: 15,
+        }
+    }
+}
+
+impl Default for PathContextRule {
+    fn default() -> Self {
+        Self {
+            patterns: vec![],
+            alert_threshold_multiplier: 1.0,
+            max_alerts_per_hour: 10,
+            context_type: PathContextType::UserDocument,
+        }
+    }
+}
+
+impl Default for NetworkBehaviorRule {
+    fn default() -> Self {
+        Self {
+            process_patterns: vec![],
+            suspicious_network_threshold: 0.5,
+            max_network_alerts_per_hour: 10,
+            whitelisted_ports: vec![80, 443, 53, 8080],
+            behavior_tolerance: NetworkToleranceLevel::Medium,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -296,7 +432,7 @@ impl Default for Config {
                 },
             },
             detectors: DetectorsConfig {
-                injection: ProcessInjectionConfig {
+                behavioral: BehavioralDetectorConfig {
                     enabled: true,
                     scan_interval_ms: 2000,
                     alert_threshold: 0.6,
@@ -305,6 +441,11 @@ impl Default for Config {
                     monitor_memory_operations: true,
                     monitor_thread_operations: true,
                     cross_platform_detection: true,
+                    system_process_contexts: HashMap::new(),
+                    alert_frequency_limits: HashMap::new(),
+                    path_context_rules: HashMap::new(),
+                    network_behavior_rules: HashMap::new(),
+                    time_based_risk_adjustment: TimeBasedRiskAdjustment::default(),
                 },
                 registry_monitor: RegistryMonitorConfig {
                     enabled: cfg!(windows),

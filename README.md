@@ -24,11 +24,13 @@ This project serves as a:
 - **High Performance**: ~120 MB memory footprint with 90%+ event compression
 - **Configurable**: YAML-based configuration with reasonable defaults
 
-### 🎯 Advanced Detection Engine (NEW)
-- **🔍 Cross-Platform Process Injection Detection**: Real-time detection of suspicious process names and file operations
-- **🧠 Context-Aware Risk Scoring**: Dynamic risk adjustment based on process location and expected system behavior
+### 🎯 Behavioral Detection Engine (NEW)
+- **🔍 Cross-Platform Threat Detection**: Real-time detection of process injection, suspicious shell execution, and malicious file operations
+- **🐧 Linux-Specific Detection**: ptrace injection sequences, .so library attacks, shell execution from suspicious locations
+- **🧠 Context-Aware Risk Scoring**: Dynamic risk adjustment based on process location, system context, and expected behavior
 - **⚡ Frequency-Based Alert Suppression**: Progressive risk reduction for repeated alerts to minimize false positives
-- **🛡️ System Process Context Recognition**: Baseline understanding of legitimate macOS/Windows/Linux system processes
+- **🛡️ System Process Context Recognition**: Baseline understanding of legitimate system processes (systemd, init, etc.)
+- **📊 Platform-Adaptive Rules**: Automatically applies Linux, Windows, or macOS-specific detection patterns
 
 ## 📋 Current Implementation Status
 
@@ -93,7 +95,8 @@ For comprehensive documentation, see the `/docs` directory:
 
 ### Advanced Features
 - **[Detection Quick Reference](docs/DETECTION_QUICK_REFERENCE.md)** - ⚡ Fast setup and troubleshooting
-- **[Advanced Detection Engine](docs/ADVANCED_DETECTION_ENGINE.md)** - Context-aware threat detection
+- **[Behavioral Detection Engine](docs/ADVANCED_DETECTION_ENGINE.md)** - Context-aware threat detection
+- **[Linux Detection Capabilities](docs/LINUX_DETECTION.md)** - Linux-specific threat detection
 - **[Detection Configuration](docs/DETECTION_CONFIGURATION.md)** - Tuning and customization guide
 
 ### System Management
@@ -126,6 +129,19 @@ tail -f logs/edr-agent.log | grep "SECURITY ALERT"
 # 3. View detection statistics
 grep "SECURITY ALERT" logs/edr-agent.log | wc -l
 grep -o "Risk: [0-9.]*" logs/edr-agent.log | sort | uniq -c
+```
+
+### Linux Detection Test
+```bash
+# Test Linux-specific detection capabilities
+cargo run --bin test_linux_detection
+
+# This test validates:
+# • Linux process injection detection (ptrace, .so attacks)
+# • System process context recognition (systemd, init)
+# • Suspicious path detection (/tmp, /dev/shm, browser cache)
+# • Shell execution monitoring
+# • Command line pattern analysis
 ```
 
 ## 🏗️ Architecture
@@ -187,10 +203,8 @@ src/
 │   └── registry.rs                # Registry monitoring (COMPLETE)
 ├── detectors/                     # Threat detection modules
 │   ├── manager.rs                 # Detection engine manager (COMPLETE)
-│   ├── injection.rs               # Process injection detection (COMPLETE)
-│   ├── registry.rs                # Registry threat detection (COMPLETE)
-│   └── injection/
-│       └── types.rs               # Injection detection types (COMPLETE)
+│   ├── behavioral.rs              # Behavioral threat detection (COMPLETE)
+│   └── registry.rs                # Registry threat detection (COMPLETE)
 ├── edr_main.rs                    # Application entry point
 ├── lib.rs                         # Library exports and module definitions
 ├── agent.rs                       # Core agent implementation (COMPLETE)

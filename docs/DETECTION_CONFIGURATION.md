@@ -9,7 +9,7 @@ This guide covers configuration options for the advanced detection engine featur
 ### Basic Settings
 ```yaml
 detectors:
-  injection:
+  behavioral:                       # New behavioral detection engine
     enabled: true                    # Enable detection engine
     scan_interval_ms: 2000          # How often to scan for threats
     alert_threshold: 0.4            # Minimum risk score to generate alerts
@@ -122,7 +122,7 @@ grep "Risk: 0\." logs/edr-agent.log | wc -l  # Suppressed alerts
 ```yaml
 # Adjust these settings based on your environment
 detectors:
-  injection:
+  behavioral:
     scan_interval_ms: 1000    # More frequent scanning (higher CPU)
     alert_threshold: 0.3      # More sensitive (more alerts)
     alert_threshold: 0.6      # Less sensitive (fewer alerts)
@@ -133,7 +133,7 @@ detectors:
 ### Development Environment
 ```yaml
 detectors:
-  injection:
+  behavioral:
     alert_threshold: 0.5      # Reduce noise from dev tools
     scan_interval_ms: 5000    # Less frequent scanning
 ```
@@ -141,7 +141,7 @@ detectors:
 ### Production Environment
 ```yaml
 detectors:
-  injection:
+  behavioral:
     alert_threshold: 0.3      # More sensitive detection
     scan_interval_ms: 1000    # Faster response time
 ```
@@ -149,7 +149,7 @@ detectors:
 ### High-Security Environment
 ```yaml
 detectors:
-  injection:
+  behavioral:
     alert_threshold: 0.2      # Very sensitive
     prevention_threshold: 0.6 # Lower blocking threshold
     monitor_memory_operations: true
@@ -164,7 +164,7 @@ detectors:
 ```yaml
 # Increase threshold or add frequency limits
 detectors:
-  injection:
+  behavioral:
     alert_threshold: 0.5      # Raise from 0.4
 ```
 
@@ -172,7 +172,7 @@ detectors:
 ```yaml
 # Lower threshold and review context rules
 detectors:
-  injection:
+  behavioral:
     alert_threshold: 0.3      # Lower from 0.4
 ```
 
@@ -180,7 +180,7 @@ detectors:
 ```yaml
 # Reduce scanning frequency
 detectors:
-  injection:
+  behavioral:
     scan_interval_ms: 3000    # Increase from 2000
 ```
 

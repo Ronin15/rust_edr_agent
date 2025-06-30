@@ -42,12 +42,34 @@ detectors:
   injection:
     enabled: true
     scan_interval_ms: 2000
-    alert_threshold: 0.4  # Lowered to catch more context-adjusted alerts
+    alert_threshold: 0.4
     prevention_threshold: 0.8
     track_api_calls: true
     monitor_memory_operations: true
     monitor_thread_operations: true
     cross_platform_detection: true
+    # Linux noise reduction based on analysis of 96,436 events
+    system_process_contexts:
+      ProcessHangMon:
+        expected_paths: ["/usr/lib/firefox/", "/snap/firefox/"]
+        max_instances: 5
+        baseline_risk_reduction: 0.8  # 80% reduction for expected behavior
+        elevated_risk_multiplier: 2.0
+      pool-gnome-shel:
+        expected_paths: ["/usr/bin/", "/usr/lib/gnome-shell/"]
+        max_instances: 10
+        baseline_risk_reduction: 0.9  # 90% reduction for GNOME processes
+        elevated_risk_multiplier: 3.0
+    alert_frequency_limits:
+      ProcessHangMon:
+        max_alerts_per_hour: 3
+        cooldown_multiplier: 0.2
+      pool-gnome-shel:
+        max_alerts_per_hour: 2
+        cooldown_multiplier: 0.1
+      firefox:
+        max_alerts_per_hour: 8
+        cooldown_multiplier: 0.3
   registry_monitor:
     enabled: true
     watched_keys:

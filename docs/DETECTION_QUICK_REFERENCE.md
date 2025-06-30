@@ -6,7 +6,7 @@
 ```yaml
 # config.yaml
 detectors:
-  injection:
+  behavioral:
     enabled: true
     alert_threshold: 0.4
 ```
@@ -60,7 +60,7 @@ alert_threshold: 0.6
 ### Common Adjustments
 ```yaml
 detectors:
-  injection:
+  behavioral:
     scan_interval_ms: 2000      # Scan frequency
     alert_threshold: 0.4        # Sensitivity
     cross_platform_detection: true
