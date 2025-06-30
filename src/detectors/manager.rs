@@ -17,13 +17,7 @@ pub struct DetectorStatus {
     pub cpu_usage_percent: f32,
 }
 
-pub mod injection;
-// Future detectors can be added here:
-// pub mod malware;
-// pub mod anomaly;
-// pub mod behavioral;
-
-use injection::InjectionDetector;
+use super::injection::InjectionDetector;
 
 // Enum to hold different detector types
 #[derive(Debug)]

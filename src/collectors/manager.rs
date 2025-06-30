@@ -7,15 +7,11 @@ use crate::config::CollectorsConfig;
 use crate::events::Event;
 use crate::agent::CollectorStatus;
 
-pub mod process;
-pub mod file;
-pub mod network;
-pub mod registry;
-
-use process::ProcessCollector;
-use file::FileCollector;
-use network::NetworkCollector;
-use registry::RegistryCollector;
+// Import from the collectors submodules
+use super::process::ProcessCollector;
+use super::file::FileCollector;
+use super::network::NetworkCollector;
+use super::registry::RegistryCollector;
 
 // Enum to hold different collector types instead of trait objects
 #[derive(Debug)]
