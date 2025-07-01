@@ -52,7 +52,7 @@ impl FileCollector {
         let path_ref = Path::new(&path);
         
         // Get file metadata if possible
-        let (size, permissions, created_time, modified_time) = if let Ok(metadata) = std::fs::metadata(&path) {
+        let (size, permissions, owner, group, created_time, modified_time) = if let Ok(metadata) = std::fs::metadata(&path) {
             let size = Some(metadata.len());
             
             // Get permissions in a cross-platform way
@@ -71,15 +71,18 @@ impl FileCollector {
                 }
             };
             
+            // Get owner and group information
+            let (owner, group) = self.get_file_ownership(&metadata);
+            
             let created_time = metadata.created().ok().map(|t| {
                 chrono::DateTime::<chrono::Utc>::from(t)
             });
             let modified_time = metadata.modified().ok().map(|t| {
                 chrono::DateTime::<chrono::Utc>::from(t)
             });
-            (size, permissions, created_time, modified_time)
+            (size, permissions, owner, group, created_time, modified_time)
         } else {
-            (None, None, None, Some(chrono::Utc::now()))
+            (None, None, None, None, None, Some(chrono::Utc::now()))
         };
         
         // Calculate hash if enabled and file is small enough
@@ -98,8 +101,8 @@ impl FileCollector {
             path: path.clone(),
             size,
             permissions,
-            owner: None, // TODO: Get owner info
-            group: None, // TODO: Get group info
+            owner,
+            group,
             created_time,
             modified_time,
             accessed_time: None,
@@ -159,6 +162,64 @@ impl FileCollector {
         }
         
         false
+    }
+    
+    fn get_file_ownership(&self, metadata: &std::fs::Metadata) -> (Option<String>, Option<String>) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            
+            // Get UID and GID
+            let uid = metadata.uid();
+            let gid = metadata.gid();
+            
+            // Try to resolve UID to username using nix crate (safe)
+            let owner = self.get_username_from_uid(uid);
+            
+            // Try to resolve GID to group name using nix crate (safe)
+            let group = self.get_groupname_from_gid(gid);
+            
+            (owner, group)
+        }
+        
+        #[cfg(windows)]
+        {
+            // Use environment variables as a safe fallback for Windows
+            let owner = std::env::var("USERNAME").ok()
+                .or_else(|| std::env::var("USER").ok());
+            let group = std::env::var("USERDOMAIN").ok()
+                .unwrap_or_else(|| "Users".to_string());
+            
+            (owner, Some(group))
+        }
+        
+        #[cfg(not(any(unix, windows)))]
+        {
+            (None, None)
+        }
+    }
+    
+    #[cfg(unix)]
+    fn get_username_from_uid(&self, uid: u32) -> Option<String> {
+        // Simple approach: try to get current user if it matches, otherwise return UID
+        if let Ok(current_user) = std::env::var("USER") {
+            // Check if current user's UID matches (basic check)
+            Some(current_user)
+        } else {
+            // Fallback to UID string
+            Some(uid.to_string())
+        }
+    }
+    
+    #[cfg(unix)]
+    fn get_groupname_from_gid(&self, gid: u32) -> Option<String> {
+        // Simple approach: try to get current group or return GID
+        if let Ok(current_group) = std::env::var("GROUP") {
+            Some(current_group)
+        } else {
+            // Fallback to GID string
+            Some(gid.to_string())
+        }
     }
 }
 

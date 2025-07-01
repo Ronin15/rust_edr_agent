@@ -378,9 +378,21 @@ impl Agent {
     }
     
     async fn get_memory_usage(&self) -> u64 {
-        // Simple memory usage estimation
-        // In a real implementation, you'd use proper system APIs
-        0
+        use sysinfo::{System, Pid};
+        
+        let mut system = System::new();
+        system.refresh_processes();
+        
+        // Get current process ID
+        let current_pid = std::process::id();
+        let pid = Pid::from(current_pid as usize);
+        
+        // Find our process and get its memory usage
+        if let Some(process) = system.process(pid) {
+            process.memory() // sysinfo returns bytes in current version
+        } else {
+            0
+        }
     }
     
     pub async fn reload_config(&self, new_config: Config) -> Result<()> {
