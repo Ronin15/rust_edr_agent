@@ -48,7 +48,7 @@ This educational project showcases:
 
 ### Building
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/Ronin15/rust_edr_agent.git
 cd edr_agent
 cargo build
 ```
