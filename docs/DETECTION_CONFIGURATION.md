@@ -128,7 +128,27 @@ detectors:
     alert_threshold: 0.6      # Less sensitive (fewer alerts)
 ```
 
-## Environment-Specific Tuning
+## macOS-Specific Detection Capabilities
+
+The detection engine includes key macOS threat detection features:
+
+### macOS Task Port Injection
+- Detects API sequences involving tasks and memory operations: `task_for_pid` → `vm_allocate` → `vm_write` → `thread_create_running`
+
+### macOS System Process Contexts
+- Recognizes legitimate macOS system processes:
+  - **mdworker_shared**: Validates execution paths, adjusting risk if outside expected locations
+  - **sharingd**: Detects execution from unauthorized paths
+  - **ReportCrash**: Flags suspicious execution contexts
+
+### Dylib Injection Monitoring
+- Tracks dylib loading from unexpected paths using `dlopen` and `dlsym`
+
+### Shell Execution Analysis
+- Monitors shells spawned from browsers, execution in `/tmp/` and other suspicious locations
+
+### Dynamic Risk Scoring
+- Uses platform-specific conditions to adjust risk dynamically
 
 ### Development Environment
 ```yaml
