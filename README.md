@@ -23,7 +23,7 @@ This educational project showcases:
 - **High Performance**: ~120 MB memory footprint with 90%+ event compression
 - **Configurable**: YAML-based configuration with reasonable defaults
 
-### 🎯 Behavioral Detection Engine (NEW)
+### 🎯 Behavioral Detection Engine
 - **🔍 Cross-Platform Threat Detection**: Real-time detection of process injection, suspicious shell execution, and malicious file operations
 - **🧠 Context-Aware Risk Scoring**: Dynamic risk adjustment based on process location, system context, and expected behavior
 - **⚡ Frequency-Based Alert Suppression**: Progressive risk reduction for repeated alerts to minimize false positives
@@ -93,7 +93,7 @@ For comprehensive documentation, see the `/docs` directory:
 ```bash
 # 1. Build and run
 cargo build
-RUST_LOG=info cargo run
+cargo run
 
 # 2. In another terminal, generate activity
 ls -la && ps aux
