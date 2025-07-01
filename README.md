@@ -132,7 +132,7 @@ cargo run --bin test_linux_detection
 ### Mac Detection Test
 ```bash
 # Test macOS-specific detection capabilities
-cargo run --bin test_mac_context
+cargo run --bin test_mac_detection
 
 # This test validates:
 # • macOS system process context recognition (mdworker, sharingd, ReportCrash)
@@ -165,11 +165,9 @@ cargo run --bin test_mac_context
 
 - **Not Production Ready**: This is a test project and lacks many security and reliability features required for production use
 - **Limited Testing**: Comprehensive testing suite is not yet implemented
-- **Network Manager**: Remote data transmission is stub implementation only
-- **Registry Monitoring**: Windows-only and requires testing
+- **Network Manager**: Phone-home networking functionality is a stub and not implemented
 - **No Security Hardening**: Missing privilege separation, input validation, etc.
 - **Performance**: Not optimized for high-throughput environments
-- **Runtime Error**: Currently has a config deserialization issue that needs fixing
 
 ## 🤝 Contributing
 

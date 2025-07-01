@@ -87,7 +87,11 @@ path = "src/bin/test_integration.rs"
 
 [[bin]]
 name = "test_linux_detection"
-path = "test_linux_context.rs"
+path = "test_linux_detection.rs"
+
+[[bin]]
+name = "test_mac_detection"
+path = "test_mac_detection.rs"
 
 [profile.release]
 lto = true
