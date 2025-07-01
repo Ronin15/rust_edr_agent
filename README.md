@@ -1,17 +1,16 @@
 # EDR Agent
 
-"Advanced EDR Prototype - Production Architecture, Educational Implementation"
-This project demonstrates production-quality EDR architecture and engineering techniques in a controlled learning environment. While the implementation showcases real-world performance targets and design patterns, it's intentionally kept in educational status until comprehensive security auditing and testing are complete.
+**Advanced EDR Prototype - Production Architecture, Educational Implementation**
 
-A high-performance EDR agent prototype written in Rust, demonstrating modern security monitoring concepts and Rust async programming patterns.
+A high-performance EDR agent prototype written in Rust, demonstrating modern security monitoring concepts and cross-platform threat detection.
 
 ## 🎯 Project Purpose
 
-This project serves as a:
-- Learning exercise for Rust systems programming
-- Prototype for EDR agent architecture design
-- Demonstration of async/await patterns in security tools
-- Test bed for cross-platform monitoring capabilities
+This educational project showcases:
+- Advanced Rust systems programming and async patterns
+- Production-quality EDR architecture design
+- Cross-platform security monitoring capabilities
+- Real-time behavioral threat detection
 
 ## 🚀 Features
 
@@ -26,34 +25,20 @@ This project serves as a:
 
 ### 🎯 Behavioral Detection Engine (NEW)
 - **🔍 Cross-Platform Threat Detection**: Real-time detection of process injection, suspicious shell execution, and malicious file operations
-- **🐧 Linux-Specific Detection**: ptrace injection sequences, .so library attacks, shell execution from suspicious locations
 - **🧠 Context-Aware Risk Scoring**: Dynamic risk adjustment based on process location, system context, and expected behavior
 - **⚡ Frequency-Based Alert Suppression**: Progressive risk reduction for repeated alerts to minimize false positives
 - **🛡️ System Process Context Recognition**: Baseline understanding of legitimate system processes (systemd, init, etc.)
 - **📊 Platform-Adaptive Rules**: Automatically applies Linux, Windows, or macOS-specific detection patterns
 
-## 📋 Current Implementation Status
+## 📋 Implementation Status
 
-### ✅ Fully Implemented
-- **Core Architecture**: Agent orchestration, lifecycle management, async event processing
-- **Configuration System**: YAML-based config with validation and defaults
-- **Process Monitoring**: Real-time process creation/termination/modification tracking with CPU/memory metrics
-- **File System Monitoring**: Live file change detection with hash calculation and metadata extraction
-- **Network Monitoring**: Connection tracking via netstat/lsof with protocol and process mapping
-- **Registry Monitoring**: Windows registry change detection with real-time alerting and threat detection
-- **Event System**: Unified event format, batching, and structured data
-- **Storage Management**: Compressed storage (90%+ compression), automatic cleanup, retention policies
-- **Logging**: Structured logging with file rotation and console output
-- **Cross-platform Support**: Works on Windows, macOS, and Linux
+**✅ Fully Implemented**: Core architecture, process/file/network monitoring, behavioral detection, storage with compression, cross-platform support
 
-### 🔄 Partially Implemented
-- **Network Manager**: Stub implementation for remote data transmission
+**🔄 Partial**: Network manager (stub), testing framework
 
-### 📋 Planned/Missing
-- **Testing Framework**: Unit and integration tests
-- **Security Hardening**: Input validation, privilege separation
-- **Performance Optimization**: High-throughput scenarios
-- **Advanced Analytics**: Event correlation, threat detection
+**📋 Planned**: Security hardening, advanced analytics
+
+📖 **Complete status in [Development Guide](docs/DEVELOPMENT.md)**
 
 ## 🛠️ Quick Start
 
@@ -144,106 +129,21 @@ cargo run --bin test_linux_detection
 # • Command line pattern analysis
 ```
 
-## 🏗️ Architecture
+## 🏗️ Architecture Overview
 
-```
-                          ┌──────────────────────────────┐
-                          │           Agent Core         │
-                          │    (Orchestration 6 Control) │
-                          └───────────────┬──────────────┘
-                                          │
-          ┌───────────────────────────────┼─────────────────────────────┐
-          │                               │                             │
-          ▼                               ▼                             ▼
- ┌───────────────────┐          ┌───────────────────┐         ┌────────────────┐
- │ Collectors        │          │ Detectors         │         │ Events System  │
- │ Manager           │          │ Manager           │         │                │
- └──────┬────────────┘          └──────────┬────────┘         └───────┬────────┘
-        │                                   │                          │
- ┌──────▼───────┐                  ┌────────▼─────────┐          ┌─────▼───────┐
- │Process       │                  │Injection         │          │Batch         │
- │Collector     │                  │Detector          │          │Processing    │
- │File Collector│                  │Registry          │          │Queue         │
- │Network       │                  │Detector          │          │              │
- │Collector     │                  └──────┬───────────┘          └──────────────┘
- │Registry      │                         │
- │Collector     │                 Other Detectors
- └──────────────┘                 (Planned)
+- **Agent Core**: Orchestrates collectors and detectors
+- **Collectors**: Process, file, network, registry monitoring
+- **Detectors**: Behavioral threat detection engines
+- **Events**: Unified event format and processing
+- **Storage**: Compressed local storage with retention
 
- ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
- │ Config Mgmt  │        │ Storage Mgmt │        │ Network Mgmt │
- │              │        │ (Compression)│        │ (Remote)     │
- │              │        │              │        │ [STUB]       │
- └──────────────┘        └──────────────┘        └──────────────┘
-```
-
-### Core Components
-
-- **Agent Core**: Orchestrates all components and manages lifecycle
-- **Collectors**: Modular monitoring components (process, file, network, registry)
-- **Events**: Unified event format and processing pipeline
-- **Storage**: Local event storage with configurable retention
-- **Network**: Remote server communication (stub)
-- **Configuration**: YAML-based configuration management
+📖 **Full architecture diagram in [Development Guide](docs/DEVELOPMENT.md)**
 
 ## 🔧 Development
 
-### Project Structure
+**Building**: `cargo build`, then `cargo run` or `./target/release/edr-agent`
 
-#### Source Code (`src/`)
-```
-src/
-├── bin/
-│   └── test_integration.rs        # Integration test binary
-├── collectors/                    # Data collection modules
-│   ├── manager.rs                 # Collector orchestration (COMPLETE)
-│   ├── process.rs                 # Process monitoring (COMPLETE)
-│   ├── file.rs                    # File system monitoring (COMPLETE)
-│   ├── network.rs                 # Network monitoring (COMPLETE)
-│   └── registry.rs                # Registry monitoring (COMPLETE)
-├── detectors/                     # Threat detection modules
-│   ├── manager.rs                 # Detection engine manager (COMPLETE)
-│   ├── behavioral.rs              # Behavioral threat detection (COMPLETE)
-│   └── registry.rs                # Registry threat detection (COMPLETE)
-├── edr_main.rs                    # Application entry point
-├── lib.rs                         # Library exports and module definitions
-├── agent.rs                       # Core agent implementation (COMPLETE)
-├── config.rs                      # Configuration management (COMPLETE)
-├── events.rs                      # Event types and handling (COMPLETE)
-├── storage.rs                     # Local storage with compression (COMPLETE)
-├── network.rs                     # Network communication (STUB)
-├── utils.rs                       # Utility functions (COMPLETE)
-└── config.yaml                    # Default configuration template
-```
-
-#### Documentation (`docs/`)
-```
-docs/
-├── ADVANCED_DETECTION_ENGINE.md    # Detection engine documentation
-├── COMPRESSION.md                  # Storage compression guide
-├── DETAILED_USAGE.md              # Comprehensive usage guide
-├── DETECTION_CONFIGURATION.md     # Detection system configuration
-├── DETECTION_QUICK_REFERENCE.md   # Quick detection setup
-├── PERFORMANCE.md                 # Performance analysis
-├── REGISTRY_MONITORING.md         # Registry monitoring and detection guide
-├── TODO.md                        # Development roadmap
-└── USAGE.md                       # Basic usage guide
-```
-
-### Building for Development
-```bash
-# Debug build with logs
-RUST_LOG=debug cargo run
-
-# Check for issues
-cargo clippy
-
-# Format code
-cargo fmt
-
-# Run tests (when implemented)
-cargo test
-```
+📖 **Complete development guide, project structure, and build instructions in [Development Guide](docs/DEVELOPMENT.md)**
 
 ## ⚠️ Important Notes
 
