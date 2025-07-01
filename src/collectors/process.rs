@@ -2,25 +2,39 @@ use anyhow::Result;
 use tracing::{debug, error, info};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
+use sysinfo::{System, Process, Pid};
 use std::collections::HashMap;
-use sysinfo::System;
+use std::time::{Duration, Instant};
 
 use crate::config::ProcessMonitorConfig;
 use crate::events::{Event, EventType, EventData, ProcessEventData};
 use crate::collectors::{Collector, PeriodicCollector};
 use crate::agent::CollectorStatus;
 
+// Process signature for deduplication (PID + memory + cpu usage)
+type ProcessSignature = (u32, u64, String); // (pid, memory, rounded_cpu)
+
+// Memory safety constants for process monitoring
+const MAX_PROCESS_CACHE_ENTRIES: usize = 500; // Hard limit on cache size
+const PROCESS_CACHE_CLEANUP_THRESHOLD: usize = 400; // Start aggressive cleanup at this point
+const PROCESS_CACHE_TTL_SECONDS: u64 = 300; // 5 minutes max TTL
+const PROCESS_DEDUP_WINDOW_SECONDS: u64 = 120; // 2 minute dedup window
+const SIGNIFICANT_CPU_CHANGE: f32 = 10.0; // 10% CPU change
+const SIGNIFICANT_MEMORY_CHANGE: u64 = 10_000_000; // 10MB memory change
+
 #[derive(Debug)]
 pub struct ProcessCollector {
     config: ProcessMonitorConfig,
     event_sender: mpsc::Sender<Event>,
-    is_running: Arc<RwLock<bool>>,
     system: Arc<RwLock<System>>,
-    known_processes: Arc<RwLock<HashMap<u32, ProcessInfo>>>,
+    is_running: Arc<RwLock<bool>>,
     hostname: String,
     agent_id: String,
     events_collected: Arc<RwLock<u64>>,
     last_error: Arc<RwLock<Option<String>>>,
+    previous_processes: Arc<RwLock<HashMap<u32, ProcessInfo>>>,
+    // Conservative deduplication for ProcessModified events
+    process_state_cache: Arc<RwLock<HashMap<ProcessSignature, Instant>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -50,11 +64,12 @@ impl ProcessCollector {
             event_sender,
             is_running: Arc::new(RwLock::new(false)),
             system: Arc::new(RwLock::new(System::new_all())),
-            known_processes: Arc::new(RwLock::new(HashMap::new())),
+            previous_processes: Arc::new(RwLock::new(HashMap::new())),
             hostname,
             agent_id,
             events_collected: Arc::new(RwLock::new(0)),
             last_error: Arc::new(RwLock::new(None)),
+            process_state_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
     
@@ -65,7 +80,38 @@ impl ProcessCollector {
         // Refresh system information
         system.refresh_processes();
         
-        let mut known_processes = self.known_processes.write().await;
+        let mut previous_processes = self.previous_processes.write().await;
+        let mut state_cache = self.process_state_cache.write().await;
+        let now = Instant::now();
+        
+        // Aggressive memory management for process state cache
+        if state_cache.len() >= PROCESS_CACHE_CLEANUP_THRESHOLD {
+            // Emergency cleanup: remove oldest 50% of entries
+            let mut entries: Vec<_> = state_cache.iter().map(|(k, &v)| (k.clone(), v)).collect();
+            entries.sort_by_key(|(_, instant)| *instant);
+            let to_remove = entries.len() / 2;
+            let keys_to_remove: Vec<_> = entries.iter().take(to_remove).map(|(k, _)| k.clone()).collect();
+            for key in keys_to_remove {
+                state_cache.remove(&key);
+            }
+            debug!("Emergency process cache cleanup: removed {} entries, {} remaining", to_remove, state_cache.len());
+        }
+        
+        // Regular TTL cleanup (older than 5 minutes)
+        let entries_before = state_cache.len();
+        state_cache.retain(|_, &mut last_seen| {
+            now.duration_since(last_seen) < Duration::from_secs(PROCESS_CACHE_TTL_SECONDS)
+        });
+        let cleaned = entries_before - state_cache.len();
+        if cleaned > 0 {
+            debug!("Process TTL cleanup: removed {} entries, {} remaining", cleaned, state_cache.len());
+        }
+        
+        // Hard limit enforcement - should never be reached with proper cleanup
+        if state_cache.len() > MAX_PROCESS_CACHE_ENTRIES {
+            state_cache.clear();
+            debug!("EMERGENCY: Process cache hit hard limit, cleared all entries");
+        }
         let mut current_pids = std::collections::HashSet::new();
         
         // Check for new and updated processes
@@ -82,8 +128,8 @@ impl ProcessCollector {
                 memory_usage: process.memory(),
             };
             
-            if !known_processes.contains_key(&pid_val) {
-                // New process detected
+            if !previous_processes.contains_key(&pid_val) {
+                // New process detected - ALWAYS report (security critical)
                 debug!("New process detected: {} (PID: {})", process_info.name, pid_val);
                 
                 let event = self.create_process_event(
@@ -93,35 +139,55 @@ impl ProcessCollector {
                 );
                 events.push(event);
                 
-                known_processes.insert(pid_val, process_info);
+                previous_processes.insert(pid_val, process_info);
             } else {
-                // Update existing process info
-                if let Some(known_process) = known_processes.get_mut(&pid_val) {
+                // Update existing process info with conservative deduplication
+                if let Some(previous_process) = previous_processes.get_mut(&pid_val) {
                     // Check for significant changes
-                    if (known_process.cpu_usage - process_info.cpu_usage).abs() > 10.0
-                        || known_process.memory_usage != process_info.memory_usage
-                    {
-                        let event = self.create_process_event(
-                            EventType::ProcessModified,
-                            &process_info,
-                            process,
+                    let has_significant_change = (previous_process.cpu_usage - process_info.cpu_usage).abs() > 10.0
+                        || (previous_process.memory_usage as i64 - process_info.memory_usage as i64).abs() > 10_000_000; // 10MB change
+                    
+                    if has_significant_change {
+                        // Create process signature for deduplication
+                        let signature = (
+                            pid_val,
+                            process_info.memory_usage / 1_000_000, // Round to nearest MB
+                            format!("{:.1}", process_info.cpu_usage), // Round CPU to 1 decimal
                         );
-                        events.push(event);
+                        
+                        // Conservative deduplication: only skip if we've reported this exact state very recently
+                        let should_report = match state_cache.get(&signature) {
+                            Some(&last_seen) => {
+                                // Only report if it's been more than 2 minutes (very conservative for security)
+                                now.duration_since(last_seen) > Duration::from_secs(120)
+                            }
+                            None => true, // Always report new states
+                        };
+                        
+                        if should_report {
+                            state_cache.insert(signature, now);
+                            let event = self.create_process_event(
+                                EventType::ProcessModified,
+                                &process_info,
+                                process,
+                            );
+                            events.push(event);
+                        }
                     }
-                    *known_process = process_info;
+                    *previous_process = process_info;
                 }
             }
         }
         
-        // Check for terminated processes
-        let terminated_pids: Vec<u32> = known_processes
+        // Check for terminated processes - ALWAYS report (security critical)
+        let terminated_pids: Vec<u32> = previous_processes
             .keys()
             .filter(|pid| !current_pids.contains(pid))
             .cloned()
             .collect();
         
         for pid in terminated_pids {
-            if let Some(process_info) = known_processes.remove(&pid) {
+            if let Some(process_info) = previous_processes.remove(&pid) {
                 debug!("Process terminated: {} (PID: {})", process_info.name, pid);
                 
                 let event = self.create_termination_event(&process_info);
@@ -268,7 +334,8 @@ impl Clone for ProcessCollector {
             event_sender: self.event_sender.clone(),
             is_running: self.is_running.clone(),
             system: self.system.clone(),
-            known_processes: self.known_processes.clone(),
+            previous_processes: self.previous_processes.clone(),
+            process_state_cache: self.process_state_cache.clone(),
             hostname: self.hostname.clone(),
             agent_id: self.agent_id.clone(),
             events_collected: self.events_collected.clone(),

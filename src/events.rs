@@ -15,7 +15,7 @@ pub struct Event {
     pub metadata: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum EventType {
     ProcessCreated,
     ProcessTerminated,

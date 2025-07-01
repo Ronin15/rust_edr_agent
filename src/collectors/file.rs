@@ -3,6 +3,8 @@ use tracing::{info, warn, error, debug};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
 use std::path::Path;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, Event as NotifyEvent, EventKind};
 
 #[cfg(unix)]
@@ -14,6 +16,16 @@ use crate::collectors::{Collector, EventCollector};
 use crate::agent::CollectorStatus;
 use crate::utils::calculate_file_hash;
 
+// File tracking for deduplication
+type FileKey = String; // File path
+
+#[derive(Debug, Clone)]
+struct FileState {
+    last_event_time: Instant,
+    last_event_type: EventType,
+    event_count: u32,
+}
+
 #[derive(Debug)]
 pub struct FileCollector {
     config: FileMonitorConfig,
@@ -23,6 +35,8 @@ pub struct FileCollector {
     agent_id: String,
     events_collected: Arc<RwLock<u64>>,
     last_error: Arc<RwLock<Option<String>>>,
+    // File event deduplication to prevent noise from busy file systems
+    file_states: Arc<RwLock<HashMap<FileKey, FileState>>>,
 }
 
 impl FileCollector {
@@ -45,6 +59,7 @@ impl FileCollector {
             agent_id,
             events_collected: Arc::new(RwLock::new(0)),
             last_error: Arc::new(RwLock::new(None)),
+            file_states: Arc::new(RwLock::new(HashMap::new())),
         })
     }
     
@@ -275,6 +290,7 @@ impl Clone for FileCollector {
             agent_id: self.agent_id.clone(),
             events_collected: self.events_collected.clone(),
             last_error: self.last_error.clone(),
+            file_states: self.file_states.clone(),
         }
     }
 }
@@ -366,18 +382,97 @@ impl FileCollector {
                 }
             };
             
-            // Create and send the event
-            let event = self.create_file_event(event_type, path_str);
+            // Intelligent file event deduplication
+            let should_report = self.should_report_file_event(&path_str, &event_type).await;
             
-            if let Err(e) = self.event_sender.send(event).await {
-                error!("Failed to send file event: {}", e);
-                return Err(anyhow::anyhow!("Failed to send event: {}", e));
+            if should_report {
+                // Create and send the event
+                let event = self.create_file_event(event_type, path_str);
+                
+                if let Err(e) = self.event_sender.send(event).await {
+                    error!("Failed to send file event: {}", e);
+                    return Err(anyhow::anyhow!("Failed to send event: {}", e));
+                }
+                
+                // Update events collected counter
+                *self.events_collected.write().await += 1;
             }
-            
-            // Update events collected counter
-            *self.events_collected.write().await += 1;
         }
         
         Ok(())
+    }
+    
+    /// Intelligent file event deduplication to prevent noise from busy file systems
+    async fn should_report_file_event(&self, file_path: &str, event_type: &EventType) -> bool {
+        let mut states = self.file_states.write().await;
+        let now = Instant::now();
+        
+        // Memory management: limit to 1000 file states max
+        if states.len() >= 1000 {
+            // Remove oldest entries
+            let mut entries: Vec<_> = states.iter().map(|(k, v)| (k.clone(), v.last_event_time)).collect();
+            entries.sort_by_key(|(_, time)| *time);
+            let to_remove = entries.len() - 800; // Keep 800, remove rest
+            for (key, _) in entries.iter().take(to_remove) {
+                states.remove(key);
+            }
+            debug!("File state cleanup: removed {} old entries", to_remove);
+        }
+        
+        // Always report security-critical events
+        let is_security_critical = matches!(event_type, 
+            EventType::FileCreated | EventType::FileDeleted
+        );
+        
+        if is_security_critical {
+            // Update state but always report
+            states.insert(file_path.to_string(), FileState {
+                last_event_time: now,
+                last_event_type: event_type.clone(),
+                event_count: 1,
+            });
+            return true;
+        }
+        
+        // For modifications and access events, apply intelligent deduplication
+        if let Some(file_state) = states.get_mut(file_path) {
+            let time_since_last = now.duration_since(file_state.last_event_time);
+            
+            // If same event type within 30 seconds, check frequency
+            if file_state.last_event_type == *event_type && time_since_last < Duration::from_secs(30) {
+                file_state.event_count += 1;
+                
+                // Rate limiting for noisy files
+                let should_skip = match file_state.event_count {
+                    1..=3 => false, // First 3 events always reported
+                    4..=10 => file_state.event_count % 3 != 0, // Every 3rd event
+                    11..=50 => file_state.event_count % 10 != 0, // Every 10th event
+                    _ => file_state.event_count % 50 != 0, // Every 50th event for very noisy files
+                };
+                
+                if should_skip {
+                    debug!("Rate limiting file events for {}: {} events in last 30s", 
+                           file_path, file_state.event_count);
+                    return false;
+                }
+            } else if time_since_last >= Duration::from_secs(30) {
+                // Reset counter if it's been 30+ seconds
+                file_state.event_count = 1;
+            }
+            
+            // Update state
+            file_state.last_event_time = now;
+            file_state.last_event_type = event_type.clone();
+            
+            true
+        } else {
+            // New file - always report first event
+            states.insert(file_path.to_string(), FileState {
+                last_event_time: now,
+                last_event_type: event_type.clone(),
+                event_count: 1,
+            });
+            true
+        }
     }
 }
