@@ -129,6 +129,22 @@ cargo run --bin test_linux_detection
 # • Command line pattern analysis
 ```
 
+### Mac Detection Test
+```bash
+# Test macOS-specific detection capabilities
+cargo run --bin test_mac_context
+
+# This test validates:
+# • macOS system process context recognition (mdworker, sharingd, ReportCrash)
+# • Suspicious path detection (/tmp, Downloads, dylib injection)
+# • Shell execution monitoring with browser-spawned detection
+# • macOS task port manipulation (task_for_pid patterns)
+# • macOS dylib injection monitoring (dlopen/dlsym)
+# • Command line pattern analysis for macOS-specific threats
+# • Memory operation tracking indicators
+# • Risk scoring and alert generation
+```
+
 ## 🏗️ Architecture Overview
 
 - **Agent Core**: Orchestrates collectors and detectors
