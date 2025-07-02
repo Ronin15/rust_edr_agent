@@ -993,6 +993,7 @@ impl NetworkCollector {
                 let cmdline_path = format!("/proc/{}/cmdline", _pid);
                 if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
                     // Extract domain patterns from command line
+                    let mut found_domain = None;
                     for word in cmdline.split_whitespace() {
                         if word.contains('.') && 
                            word.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') &&
@@ -1001,11 +1002,12 @@ impl NetworkCollector {
                             // Basic domain validation
                             let parts: Vec<&str> = word.split('.').collect();
                             if parts.len() >= 2 && parts.last().unwrap().len() >= 2 {
-                                return Some(word.to_string());
+                                found_domain = Some(word.to_string());
+                                break;
                             }
                         }
                     }
-                    None
+                    found_domain
                 } else {
                     None
                 }
