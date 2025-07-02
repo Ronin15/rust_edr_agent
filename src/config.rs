@@ -121,6 +121,8 @@ pub struct BehavioralDetectorConfig {
     pub network_behavior_rules: HashMap<String, NetworkBehaviorRule>,
     #[serde(default)]
     pub time_based_risk_adjustment: TimeBasedRiskAdjustment,
+    #[serde(default)]
+    pub process_whitelist: ProcessWhitelist,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -412,6 +414,21 @@ pub struct TimeBasedRiskAdjustment {
     pub business_hours_end: u8,    // 24-hour format
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProcessWhitelist {
+    pub enabled: bool,
+    /// Process names to exclude from monitoring (exact matches)
+    pub process_names: Vec<String>,
+    /// Process path patterns to exclude from monitoring
+    pub process_paths: Vec<String>,
+    /// Command line patterns to exclude from monitoring
+    pub command_line_patterns: Vec<String>,
+    /// Parent process names that indicate child processes should be whitelisted
+    pub parent_process_names: Vec<String>,
+    /// Agent-specific processes to exclude (automatically populated)
+    pub agent_processes: Vec<String>,
+}
+
 // Default implementations that extend existing architecture
 impl Default for SystemProcessContext {
     fn default() -> Self {
@@ -525,6 +542,7 @@ impl Default for Config {
                     path_context_rules: HashMap::new(),
                     network_behavior_rules: HashMap::new(),
                     time_based_risk_adjustment: TimeBasedRiskAdjustment::default(),
+                    process_whitelist: ProcessWhitelist::default(),
                 },
                 dns_anomaly: DnsAnomalyDetectorConfig::default(),
                 registry_monitor: RegistryMonitorConfig {

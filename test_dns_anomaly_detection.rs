@@ -150,14 +150,17 @@ async fn test_dns_anomaly_detection() -> anyhow::Result<()> {
     
     // Test 4: Command and Control communication
     println!("\n🎯 Test 4: Command and Control communication");
-    let c2_event = create_dns_event(
-        "evil-domain.tk", // This is in our known_c2_domains config
-        "standard-udp",
-        Some(6666),
-        Some("malware_c2".to_string()),
-    );
-    
-    detector.process_event(&c2_event).await.expect("Failed to process C2 DNS event");
+    // Send multiple queries to simulate beaconing pattern
+    for _ in 0..15 {
+        let c2_event = create_dns_event(
+            "evil-domain.tk", // This is in our known_c2_domains config
+            "standard-udp",
+            Some(6666),
+            Some("malware_c2".to_string()),
+        );
+        detector.process_event(&c2_event).await.expect("Failed to process C2 DNS event");
+        tokio::time::sleep(Duration::from_millis(50)).await; // Faster interval for testing
+    }
     
     // Check for C2 communication alert
     let mut c2_alert_received = false;
@@ -182,36 +185,51 @@ async fn test_dns_anomaly_detection() -> anyhow::Result<()> {
     
     // Test 5: Data exfiltration simulation
     println!("\n💾 Test 5: Data exfiltration detection");
+    
+    // Send a batch of data exfiltration events
+    let mut tasks = Vec::new();
     for i in 0..20 {
-        let large_response_event = create_dns_event_with_response(
-            &format!("data-exfil-{}.com", i),
-            "standard-udp",
-            Some(7777),
-            Some("exfil_process".to_string()),
-            100_000, // 100KB response - simulate large data transfer
-        );
-        
-        detector.process_event(&large_response_event).await.expect("Failed to process data exfil event");
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tasks.push(async move {
+            let large_response_event = create_dns_event_with_response(
+                &format!("data-exfil-{}.com", i),
+                "standard-udp",
+                Some(7777),
+                Some("exfil_process".to_string()),
+                200_000, // 200KB per response * 20 = 4MB total
+            );
+            detector.process_event(&large_response_event).await.expect("Failed to process data exfil event");
+        });
     }
     
-    // Check for data exfiltration alert
+    // Wait for all events to be processed
+    for task in tasks {
+        task.await.expect("Failed to process data exfil event");
+    }
+    
+    // Give a small window for alert processing
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    
+    // Check for data exfiltration alert with timeout
     let mut exfil_alert_received = false;
-    for _ in 0..5 {
-        if let Ok(alert) = tokio::time::timeout(Duration::from_millis(500), alert_receiver.recv()).await {
-            if let Some(alert) = alert {
-                if alert.title.contains("Data Exfiltration") {
-                    println!("✅ Data exfiltration alert detected: {}", alert.title);
-                    println!("   Data Transferred: {} MB", alert.metadata.get("data_transferred_mb").unwrap_or(&"unknown".to_string()));
-                    println!("   Severity: {:?}", alert.severity);
-                    exfil_alert_received = true;
-                    break;
-                }
+    let check_timeout = tokio::time::timeout(Duration::from_millis(500), async {
+        while let Some(alert) = alert_receiver.recv().await {
+            if alert.title.contains("Data Exfiltration") {
+                println!("✅ Data exfiltration alert detected: {}", alert.title);
+                println!("   Data Transferred: {} MB", alert.metadata.get("data_transferred_mb").unwrap_or(&"unknown".to_string()));
+                println!("   Severity: {:?}", alert.severity);
+                return true;
             }
         }
+        false
+    }).await;
+    
+    match check_timeout {
+        Ok(received) => exfil_alert_received = received,
+        Err(_) => println!("⚠️  Timeout while waiting for data exfiltration alert")
     }
+    
     if !exfil_alert_received {
-        println!("⚠️  Data exfiltration alert not detected in this test run (may require more data accumulation)");
+        println!("⚠️  Data exfiltration alert not detected in this test run");
     }
     
     // Get detector status

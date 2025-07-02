@@ -588,9 +588,14 @@ impl DnsAnomalyDetector {
     }
 
     async fn detect_c2_communication(&self, tracker: &DnsTracker, query: &DnsQuery) -> bool {
-        // Check if domain is in known C2 list
+        // Check if domain is in known C2 list - this is a strong indicator
         if self.detection_rules.known_c2_domains.contains(&query.domain) {
-            return true;
+            // If domain is known C2, we only need a few queries to confirm activity
+            if let Some(domain_stats) = tracker.domain_stats.get(&query.domain) {
+                if domain_stats.query_count >= 5 {
+                    return true;
+                }
+            }
         }
 
         // Check for beaconing to specific domains

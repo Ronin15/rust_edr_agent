@@ -11,7 +11,7 @@ use crate::events::{Event, EventData, ProcessEventData, FileEventData, NetworkEv
 use crate::detectors::{Detector, EventDetector, DetectorAlert};
 use crate::events::AlertSeverity;
 use crate::detectors::DetectorStatus;
-use crate::config::BehavioralDetectorConfig;
+use crate::config::{BehavioralDetectorConfig, ProcessWhitelist};
 
 // Cross-platform behavioral threat detector
 #[derive(Debug)]
@@ -115,14 +115,11 @@ pub struct ApiCall {
 
 // Detection rules and weights
 #[derive(Debug)]
-pub struct DetectionRules {
-    pub api_weights: HashMap<String, f32>,
-    pub sequence_patterns: Vec<SequencePattern>,
-    pub time_window_rules: Vec<TimeWindowRule>,
-    pub suspicious_paths: Vec<String>,
-    pub suspicious_processes: Vec<String>,
+struct DetectionRules {
     pub system_process_contexts: HashMap<String, SystemProcessContext>,
     pub alert_frequency_limits: HashMap<String, FrequencyLimit>,
+    pub process_whitelist: ProcessWhitelist,
+    pub suspicious_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,31 +136,49 @@ pub struct FrequencyLimit {
     pub cooldown_multiplier: f32, // Reduce subsequent alert severity
 }
 
-#[derive(Debug, Clone)]
-pub struct SequencePattern {
-    pub name: String,
-    pub apis: Vec<String>,
-    pub max_time_between: Duration,
-    pub risk_multiplier: f32,
-    pub platform: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TimeWindowRule {
-    pub event_type: InjectionEventType,
-    pub max_count: u32,
-    pub time_window: Duration,
-    pub risk_score: f32,
-}
 
 impl BehavioralDetector {
+    fn should_whitelist(&self, process_data: &ProcessEventData, tracker: &ProcessTracker) -> bool {
+        let whitelist = &self.detection_rules.process_whitelist;
+        if !whitelist.enabled {
+            return false;
+        }
+
+        // Check against whitelisted process names
+        if whitelist.process_names.contains(&process_data.name) {
+            return true;
+        }
+
+        // Check against whitelisted process paths
+        if whitelist.process_paths.iter().any(|pattern| process_data.path.contains(pattern)) {
+            return true;
+        }
+
+        // Check against whitelisted command lines
+        if let Some(command_line) = &process_data.command_line {
+            if whitelist.command_line_patterns.iter().any(|pattern| command_line.contains(pattern)) {
+                return true;
+            }
+        }
+
+        // Check if parent process is whitelisted
+        if let Some(ppid) = process_data.ppid {
+            if let Some(parent) = tracker.processes.get(&ppid) {
+                if whitelist.parent_process_names.contains(&parent.name) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
     pub async fn new(
         config: BehavioralDetectorConfig,
         alert_sender: mpsc::Sender<DetectorAlert>,
         agent_id: String,
         hostname: String,
     ) -> Result<Self> {
-        let detection_rules = Self::create_platform_rules();
+        let detection_rules = Self::create_platform_rules_with_config(config.process_whitelist.clone());
         
         Ok(Self {
             config,
@@ -177,19 +192,8 @@ impl BehavioralDetector {
         })
     }
 
-    // Create platform-specific detection rules
-    fn create_platform_rules() -> DetectionRules {
-        let mut api_weights = HashMap::new();
-        let mut sequence_patterns = Vec::new();
+    fn create_platform_rules_with_config(whitelist: ProcessWhitelist) -> DetectionRules {
         let mut suspicious_paths = Vec::new();
-        let suspicious_processes = Vec::new();
-        
-        // Cross-platform suspicious APIs and patterns
-        api_weights.insert("dlopen".to_string(), 0.3);
-        api_weights.insert("dlsym".to_string(), 0.4);
-        api_weights.insert("mmap".to_string(), 0.3);
-        api_weights.insert("mprotect".to_string(), 0.5);
-        api_weights.insert("ptrace".to_string(), 0.7);
         
         // Cross-platform suspicious paths
         suspicious_paths.extend([
@@ -198,21 +202,8 @@ impl BehavioralDetector {
             "/var/tmp/".to_string(),
         ]);
         
-        // Focus on truly suspicious execution contexts rather than common process names
-        // We'll check these in behavioral context analysis instead
-        
         #[cfg(windows)]
         {
-            // Windows-specific APIs
-            api_weights.insert("OpenProcess".to_string(), 0.3);
-            api_weights.insert("VirtualAllocEx".to_string(), 0.4);
-            api_weights.insert("WriteProcessMemory".to_string(), 0.5);
-            api_weights.insert("CreateRemoteThread".to_string(), 0.7);
-            api_weights.insert("SetThreadContext".to_string(), 0.6);
-            api_weights.insert("QueueUserAPC".to_string(), 0.6);
-            api_weights.insert("LoadLibrary".to_string(), 0.3);
-            api_weights.insert("GetProcAddress".to_string(), 0.4);
-            
             // Windows suspicious paths
             suspicious_paths.extend([
                 "\\Windows\\Temp\\".to_string(),
@@ -220,71 +211,6 @@ impl BehavioralDetector {
                 "\\AppData\\Local\\Temp\\".to_string(),
                 "\\ProgramData\\".to_string(),
             ]);
-            
-            // Windows suspicious processes
-            suspicious_processes.extend([
-                "powershell.exe".to_string(),
-                "cmd.exe".to_string(),
-                "rundll32.exe".to_string(),
-                "regsvr32.exe".to_string(),
-                "mshta.exe".to_string(),
-                "wscript.exe".to_string(),
-                "cscript.exe".to_string(),
-            ]);
-            
-            // Classic injection pattern
-            sequence_patterns.push(SequencePattern {
-                name: "Windows DLL Injection".to_string(),
-                apis: vec![
-                    "OpenProcess".to_string(),
-                    "VirtualAllocEx".to_string(),
-                    "WriteProcessMemory".to_string(),
-                    "CreateRemoteThread".to_string(),
-                ],
-                max_time_between: Duration::from_secs(30),
-                risk_multiplier: 2.0,
-                platform: Some("windows".to_string()),
-            });
-        }
-        
-        #[cfg(target_os = "macos")]
-        {
-            // macOS-specific APIs
-            api_weights.insert("task_for_pid".to_string(), 0.6);
-            api_weights.insert("vm_allocate".to_string(), 0.4);
-            api_weights.insert("vm_write".to_string(), 0.5);
-            api_weights.insert("thread_create_running".to_string(), 0.7);
-            api_weights.insert("mach_port_allocate".to_string(), 0.3);
-            
-            // macOS injection pattern
-            sequence_patterns.push(SequencePattern {
-                name: "macOS Task Port Injection".to_string(),
-                apis: vec![
-                    "task_for_pid".to_string(),
-                    "vm_allocate".to_string(),
-                    "vm_write".to_string(),
-                    "thread_create_running".to_string(),
-                ],
-                max_time_between: Duration::from_secs(30),
-                risk_multiplier: 2.0,
-                platform: Some("macos".to_string()),
-            });
-        }
-        
-        #[cfg(target_os = "linux")]
-        {
-            // Linux-specific patterns
-            sequence_patterns.push(SequencePattern {
-                name: "Linux ptrace Injection".to_string(),
-                apis: vec![
-                    "ptrace".to_string(),
-                    "mmap".to_string(),
-                    "mprotect".to_string(),
-                ],
-                max_time_between: Duration::from_secs(30),
-                risk_multiplier: 1.8,
-                platform: Some("linux".to_string()),
-            });
         }
         
         // System process context definitions
@@ -363,40 +289,29 @@ impl BehavioralDetector {
         });
         
         DetectionRules {
-            api_weights,
-            sequence_patterns,
-            suspicious_paths,
-            suspicious_processes,
             system_process_contexts,
             alert_frequency_limits,
-            time_window_rules: vec![
-                TimeWindowRule {
-                    event_type: InjectionEventType::CrossProcessMemoryOp,
-                    max_count: 5,
-                    time_window: Duration::from_secs(60),
-                    risk_score: 0.6,
-                },
-                TimeWindowRule {
-                    event_type: InjectionEventType::DllInjection,
-                    max_count: 3,
-                    time_window: Duration::from_secs(30),
-                    risk_score: 0.7,
-                },
-            ],
+            process_whitelist: whitelist,
+            suspicious_paths,
         }
     }
 
-    async fn analyze_process_event(
-        &self,
-        tracker: &mut ProcessTracker,
-        _event: &Event,
-        process_data: &ProcessEventData,
-    ) -> Result<Option<DetectorAlert>> {
-        let pid = process_data.pid;
-        
-        // Update or create process state
-        let process_state = tracker.processes.entry(pid).or_insert_with(|| {
-            ProcessState {
+async fn analyze_process_event(
+    &self,
+    tracker: &mut ProcessTracker,
+    _event: &Event,
+    process_data: &ProcessEventData,
+) -> Result<Option<DetectorAlert>> {
+    let pid = process_data.pid;
+
+    // Check if the process should be whitelisted
+    if self.should_whitelist(process_data, tracker) {
+        return Ok(None);
+    }
+
+    // Update or create process state
+    let process_state = tracker.processes.entry(pid).or_insert_with(|| {
+        ProcessState {
                 pid,
                 name: process_data.name.clone(),
                 path: process_data.path.clone(),
@@ -953,6 +868,28 @@ impl BehavioralDetector {
         if parent_pid == 0 {
             return None; // No parent to analyze
         }
+
+        // Check if this process should be whitelisted
+        let process_data = ProcessEventData {
+            pid,
+            ppid: Some(parent_pid),
+            name: process_name.to_string(),
+            path: process_path.to_string(),
+            command_line: None,
+            user: None,
+            session_id: None,
+            start_time: None,
+            end_time: None,
+            exit_code: None,
+            cpu_usage: None,
+            memory_usage: None,
+            environment: None,
+            hashes: None,
+        };
+        
+        if self.should_whitelist(&process_data, tracker) {
+            return None;
+        }
         
         // Get parent process information
         if let Some(parent_process) = tracker.processes.get(&parent_pid) {
@@ -1283,6 +1220,7 @@ mod tests {
             path_context_rules: HashMap::new(),
             network_behavior_rules: HashMap::new(),
             time_based_risk_adjustment: Default::default(),
+            process_whitelist: Default::default(),
         };
         
         let (alert_sender, _) = mpsc::channel(100);
@@ -1313,6 +1251,7 @@ mod tests {
             path_context_rules: HashMap::new(),
             network_behavior_rules: HashMap::new(),
             time_based_risk_adjustment: Default::default(),
+            process_whitelist: Default::default(),
         };
         
         let (alert_sender, mut alert_receiver) = mpsc::channel(100);

@@ -53,6 +53,20 @@ detectors:
       weekend_multiplier: 0.0
       business_hours_start: 0
       business_hours_end: 0
+    process_whitelist:
+      enabled: true
+      process_names:
+        - tokio-runtime-w
+        - edr-agent
+        - rust_edr_agent
+      process_paths:
+        - target/debug/
+        - target/release/
+      command_line_patterns: []
+      parent_process_names: []
+      agent_processes:
+        - tokio-runtime-w
+        - edr-agent
   dns_anomaly:
     enabled: true
     max_queries_per_minute: 100

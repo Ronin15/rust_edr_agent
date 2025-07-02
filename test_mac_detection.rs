@@ -25,6 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         path_context_rules: HashMap::new(),
         network_behavior_rules: HashMap::new(),
         time_based_risk_adjustment: Default::default(),
+        process_whitelist: Default::default(),
     };
     
     let (alert_sender, mut alert_receiver) = mpsc::channel(100);

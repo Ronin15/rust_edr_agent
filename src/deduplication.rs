@@ -108,7 +108,6 @@ pub struct SecurityAwareDeduplicator {
     similarity_cache: RwLock<HashMap<String, SimilarityEntry>>,
     
     // Phase 2 Enhancements: Adaptive rate limiting state
-    noise_pattern_tracker: RwLock<HashMap<String, NoisePatternState>>,
     
     // Statistics
     stats: RwLock<DeduplicationStats>,
@@ -150,25 +149,13 @@ struct MicrosecondEntry {
     first_seen: Instant,
     last_seen: Instant,
     count: u32,
-    content_hash: String,
 }
-
 #[derive(Debug, Clone)]
 struct SimilarityEntry {
     first_seen: Instant,
     last_seen: Instant,
     count: u32,
-    similarity_score: f32,
     representative_hash: String,
-}
-
-#[derive(Debug, Clone)]
-struct NoisePatternState {
-    event_count: u32,
-    window_start: Instant,
-    baseline_rate: f32,
-    is_noisy: bool,
-    adjusted_rate_limit: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -196,7 +183,6 @@ impl SecurityAwareDeduplicator {
             // Phase 2 Enhancement caches
             microsecond_cache: RwLock::new(HashMap::new()),
             similarity_cache: RwLock::new(HashMap::new()),
-            noise_pattern_tracker: RwLock::new(HashMap::new()),
             stats: RwLock::new(DeduplicationStats::default()),
             last_cleanup: RwLock::new(Instant::now()),
         }
@@ -648,7 +634,6 @@ impl SecurityAwareDeduplicator {
                 first_seen: now,
                 last_seen: now,
                 count: 1,
-                content_hash: content_hash.clone(),
             });
             
             // Prevent cache from growing too large
@@ -706,7 +691,6 @@ impl SecurityAwareDeduplicator {
                 first_seen: now,
                 last_seen: now,
                 count: 1,
-                similarity_score: 1.0, // Perfect match with itself
                 representative_hash: self.generate_robust_content_hash(event),
             });
             
