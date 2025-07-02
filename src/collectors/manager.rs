@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 use tokio::sync::mpsc;
 
 use crate::config::CollectorsConfig;
@@ -252,20 +252,38 @@ pub trait PeriodicCollector: Collector {
         while self.is_running().await {
             interval.tick().await;
             
+            if !self.is_running().await {
+                break; // Exit if stopped during interval
+            }
+            
             match self.collect().await {
                 Ok(events) => {
                     for event in events {
+                        // Check if still running before sending each event
+                        if !self.is_running().await {
+                            debug!("Collector {} stopping, discarding remaining events", self.name());
+                            break;
+                        }
+                        
                         if let Err(e) = self.get_event_sender().send(event).await {
-                            error!("Failed to send event from {}: {}", self.name(), e);
+                            if self.is_running().await {
+                                error!("Failed to send event from {}: {}", self.name(), e);
+                            } else {
+                                debug!("Collector {} stopped, channel closed during event sending", self.name());
+                            }
+                            break; // Stop sending if channel is closed
                         }
                     }
                 }
                 Err(e) => {
-                    error!("Collection error in {}: {}", self.name(), e);
+                    if self.is_running().await {
+                        error!("Collection error in {}: {}", self.name(), e);
+                    }
                 }
             }
         }
         
+        debug!("Periodic collector {} stopped gracefully", self.name());
         Ok(())
     }
     

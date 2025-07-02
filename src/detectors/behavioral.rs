@@ -421,6 +421,13 @@ impl BehavioralDetector {
         
         // Check for suspicious process characteristics using context-aware scoring
         let mut alerts = Vec::new();
+        
+        // Implement parent process hierarchy analysis for injection detection
+        if let Some(parent_alert) = self.analyze_parent_process_hierarchy(
+            tracker, pid, parent_pid, &process_name, &process_path
+        ).await {
+            alerts.push(parent_alert);
+        }
 
         // Linux-specific behavioral detection
         #[cfg(target_os = "linux")]
@@ -933,6 +940,171 @@ impl BehavioralDetector {
         browser_cache_patterns.iter().any(|&pattern| process_path.contains(pattern))
     }
 
+    // Analyze parent process hierarchy for injection detection
+    async fn analyze_parent_process_hierarchy(
+        &self,
+        tracker: &mut ProcessTracker,
+        pid: u32,
+        parent_pid: u32,
+        process_name: &str,
+        process_path: &str,
+    ) -> Option<DetectorAlert> {
+        if parent_pid == 0 {
+            return None; // No parent to analyze
+        }
+        
+        // Get parent process information
+        if let Some(parent_process) = tracker.processes.get(&parent_pid) {
+            let parent_name = &parent_process.name;
+            let parent_path = &parent_process.path;
+            
+            // Check for suspicious parent-child relationships
+            
+            // 1. System processes spawning from unexpected locations
+            if self.is_system_process_name(process_name) {
+                if let Some(expected_context) = self.detection_rules.system_process_contexts.get(process_name) {
+                    let is_in_expected_path = expected_context.expected_paths.iter()
+                        .any(|expected_path| process_path.starts_with(expected_path));
+                    
+                    if !is_in_expected_path {
+                        return Some(self.create_alert(
+                            InjectionEventType::SuspiciousProcess,
+                            AlertSeverity::High,
+                            "System process in unexpected location".to_string(),
+                            format!(
+                                "System process {} (PID: {}) running from unexpected location: {}. Expected paths: {:?}",
+                                process_name, pid, process_path, expected_context.expected_paths
+                            ),
+                            0.8,
+                            vec![pid, parent_pid],
+                        ));
+                    }
+                }
+            }
+            
+            // 2. Processes spawned by browsers or other applications that shouldn't spawn system utilities
+            if self.is_browser_process(parent_name) && self.is_system_utility(process_name) {
+                return Some(self.create_alert(
+                    InjectionEventType::SuspiciousProcess,
+                    AlertSeverity::High,
+                    "System utility spawned by browser".to_string(),
+                    format!(
+                        "System utility {} (PID: {}) spawned by browser process {} (PID: {})",
+                        process_name, pid, parent_name, parent_pid
+                    ),
+                    0.9,
+                    vec![pid, parent_pid],
+                ));
+            }
+            
+            // 3. Check for process hollowing patterns (process name mismatch with parent expectations)
+            if self.is_potential_process_hollowing(process_name, process_path, parent_name, parent_path) {
+                return Some(self.create_alert(
+                    InjectionEventType::ProcessHollowing,
+                    AlertSeverity::Critical,
+                    "Potential process hollowing detected".to_string(),
+                    format!(
+                        "Process {} (PID: {}) may be hollowed. Parent: {} (PID: {}). Path: {}",
+                        process_name, pid, parent_name, parent_pid, process_path
+                    ),
+                    0.95,
+                    vec![pid, parent_pid],
+                ));
+            }
+            
+            // 4. Check for unusual process chains (deep nesting or circular references)
+            let chain_depth = self.calculate_process_chain_depth(tracker, pid, 0);
+            if chain_depth > 10 {
+                return Some(self.create_alert(
+                    InjectionEventType::SuspiciousProcess,
+                    AlertSeverity::Medium,
+                    "Unusual process chain depth".to_string(),
+                    format!(
+                        "Process {} (PID: {}) has unusual chain depth: {}. This may indicate process injection or malware activity.",
+                        process_name, pid, chain_depth
+                    ),
+                    0.6,
+                    vec![pid],
+                ));
+            }
+        }
+        
+        None
+    }
+    
+    fn is_system_process_name(&self, process_name: &str) -> bool {
+        self.detection_rules.system_process_contexts.contains_key(process_name)
+    }
+    
+    fn is_browser_process(&self, process_name: &str) -> bool {
+        let browser_names = [
+            "firefox", "chrome", "chromium", "safari", "edge", "opera", "brave",
+            "webkit", "electron", "discord", "slack", "teams", "zoom"
+        ];
+        let name_lower = process_name.to_lowercase();
+        browser_names.iter().any(|&browser| name_lower.contains(browser))
+    }
+    
+    fn is_system_utility(&self, process_name: &str) -> bool {
+        let system_utilities = [
+            "sh", "bash", "zsh", "fish", "dash", "cmd", "powershell", "pwsh",
+            "python", "python3", "perl", "ruby", "node", "php",
+            "curl", "wget", "nc", "netcat", "ssh", "scp", "rsync",
+            "sudo", "su", "doas", "systemctl", "service",
+            "grep", "awk", "sed", "find", "locate", "which"
+        ];
+        let name_lower = process_name.to_lowercase();
+        system_utilities.iter().any(|&util| name_lower == util || name_lower.ends_with(&format!("/{}", util)))
+    }
+    
+    fn is_potential_process_hollowing(&self, process_name: &str, process_path: &str, parent_name: &str, parent_path: &str) -> bool {
+        // Check for mismatched process names and paths
+        // This is a simplified heuristic - real process hollowing detection would be more complex
+        
+        // 1. Process name doesn't match the executable name in the path
+        if let Some(path_filename) = process_path.split('/').last() {
+            let path_basename = path_filename.split('.').next().unwrap_or(path_filename);
+            if process_name != path_basename && !process_name.starts_with(path_basename) {
+                return true;
+            }
+        }
+        
+        // 2. Child process in same directory as parent but different expected behavior
+        if process_path.starts_with(&parent_path[..parent_path.rfind('/').unwrap_or(0)]) {
+            // Same directory, check if this is expected behavior
+            if parent_name == "explorer.exe" && process_name != "explorer.exe" {
+                return true; // Suspicious: non-explorer process in explorer directory
+            }
+        }
+        
+        // 3. System processes in user directories
+        if self.is_system_process_name(process_name) {
+            let user_directories = ["/home/", "/Users/", "C:\\Users\\", "/tmp/", "/var/tmp/"];
+            if user_directories.iter().any(|&dir| process_path.contains(dir)) {
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    fn calculate_process_chain_depth(&self, tracker: &ProcessTracker, pid: u32, current_depth: u32) -> u32 {
+        if current_depth > 20 {
+            return current_depth; // Prevent infinite recursion
+        }
+        
+        if let Some(process) = tracker.processes.get(&pid) {
+            let parent_pid = process.parent_pid;
+            if parent_pid == 0 || parent_pid == pid {
+                return current_depth;
+            }
+            
+            return self.calculate_process_chain_depth(tracker, parent_pid, current_depth + 1);
+        }
+        
+        current_depth
+    }
+    
     fn cleanup_old_events(&self, tracker: &mut ProcessTracker) {
         let cutoff_time = Instant::now() - Duration::from_secs(3600); // Keep 1 hour of events
         

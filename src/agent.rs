@@ -132,7 +132,7 @@ impl Agent {
         let batch_interval = Duration::from_millis(self.config.agent.collection_interval_ms);
         let max_batch_size = self.config.agent.max_events_per_batch;
         
-        while *self.is_running.read().await {
+        loop {
             tokio::select! {
                 // Receive new events
                 event_opt = event_receiver.recv() => {
@@ -148,16 +148,16 @@ impl Agent {
                             }
                         }
                         None => {
-                            warn!("Event receiver channel closed");
+                            debug!("Event receiver channel closed - processing remaining events");
                             break;
                         }
                     }
                 }
                 
-                // Process batch on timeout
+                // Process batch on timeout (only if still running)
                 _ = tokio::time::sleep_until(
                     tokio::time::Instant::from(last_batch_time + batch_interval)
-                ) => {
+                ), if *self.is_running.read().await => {
                     if !event_batch.is_empty() {
                         self.process_batch(&mut event_batch).await?;
                         last_batch_time = std::time::Instant::now();
@@ -166,9 +166,32 @@ impl Agent {
             }
         }
         
-        // Process any remaining events
+        // Process any remaining events after channel closes
         if !event_batch.is_empty() {
+            debug!("Processing final batch of {} events", event_batch.len());
             self.process_batch(&mut event_batch).await?;
+        }
+        
+        // Drain any remaining events in the channel
+        let mut remaining_count = 0;
+        while let Ok(event) = event_receiver.try_recv() {
+            event_batch.add_event(event);
+            remaining_count += 1;
+            
+            // Process in batches to avoid memory issues
+            if event_batch.len() >= max_batch_size {
+                self.process_batch(&mut event_batch).await?;
+            }
+        }
+        
+        // Process final remaining events
+        if !event_batch.is_empty() {
+            debug!("Processing final remaining batch of {} events", event_batch.len());
+            self.process_batch(&mut event_batch).await?;
+        }
+        
+        if remaining_count > 0 {
+            debug!("Processed {} remaining events after channel close", remaining_count);
         }
         
         info!("Event processing stopped");
@@ -338,25 +361,45 @@ impl Agent {
     pub async fn shutdown(&self) {
         info!("Shutting down EDR Agent");
         
-        // Mark as not running - this stops collectors from generating new events
+        // Step 1: Mark as not running - this signals collectors to stop generating new events
         *self.is_running.write().await = false;
         
-        // Stop collectors (signals them to stop, doesn't force immediate termination)
+        // Step 2: Stop collectors and wait for them to completely finish
         info!("Stopping collectors...");
         if let Err(e) = self.collector_manager.stop().await {
             error!("Error stopping collectors: {}", e);
         }
         
-        // Wait a moment for collectors to finish their current work
+        // Step 3: Wait until all collectors are completely stopped
         info!("Waiting for collectors to finish current operations...");
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        loop {
+            let mut all_stopped = true;
+            for status in self.collector_manager.get_status().await {
+                if status.is_running {
+                    all_stopped = false;
+                    break;
+                }
+            }
+            
+            if all_stopped {
+                info!("All collectors have stopped");
+                break;
+            }
+            
+            // Short sleep to avoid busy waiting
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
         
-        // Stop detectors
+        // Step 4: Give a final moment for any last events to be processed
+        info!("Allowing final events to be processed...");
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        // Step 5: Stop detectors
         if let Err(e) = self.detector_manager.stop().await {
             error!("Error stopping detectors: {}", e);
         }
         
-        // Send shutdown signal
+        // Step 6: Send shutdown signal (this will cause event processing to end and channels to close)
         if let Some(sender) = self.shutdown_sender.write().await.take() {
             let _ = sender.send(()).await;
         }

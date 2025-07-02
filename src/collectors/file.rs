@@ -389,9 +389,20 @@ impl FileCollector {
                 // Create and send the event
                 let event = self.create_file_event(event_type, path_str);
                 
+                // Check if still running before sending
+                if !self.is_running().await {
+                    debug!("File collector stopping, discarding file event");
+                    break;
+                }
+                
                 if let Err(e) = self.event_sender.send(event).await {
-                    error!("Failed to send file event: {}", e);
-                    return Err(anyhow::anyhow!("Failed to send event: {}", e));
+                    if self.is_running().await {
+                        error!("Failed to send file event: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send event: {}", e));
+                    } else {
+                        debug!("File collector stopped, channel closed during event sending");
+                        break; // Stop processing if channel is closed and we're shutting down
+                    }
                 }
                 
                 // Update events collected counter
