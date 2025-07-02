@@ -204,22 +204,13 @@ impl DnsAnomalyDetector {
         let known_c2_domains: HashSet<String> = config.known_c2_domains.iter().cloned().collect();
         let dns_over_https_providers: HashSet<String> = config.dns_over_https_providers.iter().cloned().collect();
 
-        // Default suspicious query types if not configured
-        let suspicious_query_types = if config.suspicious_domain_patterns.is_empty() {
-            vec![
-                "TXT".to_string(),
-                "NULL".to_string(),
-                "PRIVATE".to_string(),
-                "UNASSIGNED".to_string(),
-            ]
-        } else {
-            vec![
-                "TXT".to_string(),
-                "NULL".to_string(),
-                "PRIVATE".to_string(),
-                "UNASSIGNED".to_string(),
-            ]
-        };
+        // Default suspicious query types
+        let suspicious_query_types = vec![
+            "TXT".to_string(),
+            "NULL".to_string(),
+            "PRIVATE".to_string(),
+            "UNASSIGNED".to_string(),
+        ];
 
         DnsDetectionRules {
             max_queries_per_minute: config.max_queries_per_minute,
@@ -240,92 +231,6 @@ impl DnsAnomalyDetector {
         }
     }
 
-    fn create_detection_rules() -> DnsDetectionRules {
-        let mut suspicious_domain_patterns = Vec::new();
-        let known_malicious_domains = HashSet::new();
-        let mut known_c2_domains = HashSet::new();
-        let mut alert_frequency_limits = HashMap::new();
-        let mut dns_over_https_providers = HashSet::new();
-        let mut suspicious_query_types = Vec::new();
-
-        // Suspicious domain patterns (regex-like patterns)
-        suspicious_domain_patterns.extend([
-            r".*\.onion$".to_string(),                          // Tor domains
-            r".*[0-9]{10,}.*".to_string(),                      // Long numeric sequences
-            r".*[a-fA-F0-9]{32,}.*".to_string(),               // Long hex sequences
-            r".*[A-Za-z0-9+/]{20,}=*.*".to_string(),           // Base64 patterns
-            r".*\.tk$".to_string(),                             // Free TLD often used maliciously
-            r".*\.ml$".to_string(),                             // Free TLD often used maliciously
-            r".*\.ga$".to_string(),                             // Free TLD often used maliciously
-            r".*\.cf$".to_string(),                             // Free TLD often used maliciously
-            r".*dyndns\..*".to_string(),                        // Dynamic DNS
-            r".*ddns\..*".to_string(),                          // Dynamic DNS
-            r".*ngrok\..*".to_string(),                         // Tunneling service
-        ]);
-
-        // Known C2 domains (examples - in real deployment, use threat intelligence)
-        known_c2_domains.extend([
-            "malware-c2.example.com".to_string(),
-            "evil-domain.tk".to_string(),
-            "suspicious-beacon.ml".to_string(),
-        ]);
-
-        // DNS over HTTPS providers
-        dns_over_https_providers.extend([
-            "1.1.1.1".to_string(),                              // Cloudflare
-            "1.0.0.1".to_string(),                              // Cloudflare
-            "8.8.8.8".to_string(),                              // Google
-            "8.8.4.4".to_string(),                              // Google
-            "9.9.9.9".to_string(),                              // Quad9
-            "149.112.112.112".to_string(),                      // Quad9
-            "208.67.222.222".to_string(),                       // OpenDNS
-            "208.67.220.220".to_string(),                       // OpenDNS
-            "94.140.14.14".to_string(),                         // AdGuard
-            "94.140.15.15".to_string(),                         // AdGuard
-        ]);
-
-        // Suspicious query types that might indicate tunneling
-        suspicious_query_types.extend([
-            "TXT".to_string(),                                  // Often used for data exfiltration
-            "NULL".to_string(),                                 // Unusual query type
-            "PRIVATE".to_string(),                              // Unusual query type
-            "UNASSIGNED".to_string(),                           // Unusual query type
-        ]);
-
-        // Alert frequency limits to prevent spam
-        alert_frequency_limits.insert("dns_tunneling".to_string(), FrequencyLimit {
-            max_alerts_per_hour: 5,
-            cooldown_multiplier: 0.5,
-        });
-
-        alert_frequency_limits.insert("high_volume_dns".to_string(), FrequencyLimit {
-            max_alerts_per_hour: 3,
-            cooldown_multiplier: 0.7,
-        });
-
-        alert_frequency_limits.insert("suspicious_domain".to_string(), FrequencyLimit {
-            max_alerts_per_hour: 10,
-            cooldown_multiplier: 0.3,
-        });
-
-        DnsDetectionRules {
-            max_queries_per_minute: 100,
-            max_queries_per_hour: 1000,
-            max_unique_domains_per_hour: 500,
-            suspicious_domain_patterns,
-            known_malicious_domains,
-            known_c2_domains,
-            base64_detection_threshold: 0.7,        // 70% base64 characters
-            entropy_threshold: 4.5,                 // High entropy indicates randomness
-            max_subdomain_length: 63,               // DNS spec limit
-            txt_record_size_threshold: 512,         // Large TXT records are suspicious
-            beaconing_detection_threshold: 0.8,     // 80% regular intervals
-            data_exfiltration_threshold_mb_per_hour: 100, // 100MB/hour threshold
-            alert_frequency_limits,
-            dns_over_https_providers,
-            suspicious_query_types,
-        }
-    }
 
     async fn analyze_dns_event(
         &self,
