@@ -20,14 +20,14 @@ const PROCESS_CACHE_CLEANUP_THRESHOLD: usize = 400; // Start aggressive cleanup 
 const PROCESS_CACHE_TTL_SECONDS: u64 = 300; // 5 minutes max TTL
 // These constants are embedded inline where used for clarity
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProcessCollector {
-    config: ProcessMonitorConfig,
+    config: Arc<ProcessMonitorConfig>,
     event_sender: mpsc::Sender<Event>,
     system: Arc<RwLock<System>>,
     is_running: Arc<RwLock<bool>>,
-    hostname: String,
-    agent_id: String,
+    hostname: Arc<str>,
+    agent_id: Arc<str>,
     events_collected: Arc<RwLock<u64>>,
     last_error: Arc<RwLock<Option<String>>>,
     previous_processes: Arc<RwLock<HashMap<u32, ProcessInfo>>>,
@@ -50,15 +50,16 @@ impl ProcessCollector {
         config: ProcessMonitorConfig,
         event_sender: mpsc::Sender<Event>,
     ) -> Result<Self> {
-        let hostname = hostname::get()
+        let hostname: Arc<str> = hostname::get()
             .unwrap_or_default()
             .to_string_lossy()
-            .to_string();
+            .to_string()
+            .into();
         
-        let agent_id = uuid::Uuid::new_v4().to_string();
+        let agent_id: Arc<str> = uuid::Uuid::new_v4().to_string().into();
         
         Ok(Self {
-            config,
+            config: Arc::new(config),
             event_sender,
             is_running: Arc::new(RwLock::new(false)),
             system: Arc::new(RwLock::new(System::new_all())),
@@ -253,8 +254,8 @@ impl ProcessCollector {
         Event::new(
             event_type,
             "process_monitor".to_string(),
-            self.hostname.clone(),
-            self.agent_id.clone(),
+            self.hostname.to_string(),
+            self.agent_id.to_string(),
             data,
         )
     }
@@ -570,8 +571,8 @@ impl ProcessCollector {
         Event::new(
             EventType::ProcessTerminated,
             "process_monitor".to_string(),
-            self.hostname.clone(),
-            self.agent_id.clone(),
+            self.hostname.to_string(),
+            self.agent_id.to_string(),
             data,
         )
     }
@@ -619,22 +620,6 @@ impl Collector for ProcessCollector {
     }
 }
 
-impl Clone for ProcessCollector {
-    fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            event_sender: self.event_sender.clone(),
-            is_running: self.is_running.clone(),
-            system: self.system.clone(),
-            previous_processes: self.previous_processes.clone(),
-            process_state_cache: self.process_state_cache.clone(),
-            hostname: self.hostname.clone(),
-            agent_id: self.agent_id.clone(),
-            events_collected: self.events_collected.clone(),
-            last_error: self.last_error.clone(),
-        }
-    }
-}
 
 #[async_trait::async_trait]
 impl PeriodicCollector for ProcessCollector {

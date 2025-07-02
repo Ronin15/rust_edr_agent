@@ -102,6 +102,43 @@ detectors:
     watched_keys:
     - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
     - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+deduplication:
+  # Phase 1: Content-based deduplication
+  exact_duplicate_window_secs: 1800  # 30 minutes (Phase 1 optimization)
+  security_critical_bypass: true
+  
+  # Phase 2: Burst detection
+  burst_threshold: 5                 # More aggressive (Phase 1 optimization)
+  burst_window_secs: 30              # Shorter window (Phase 1 optimization)
+  burst_summary_interval: 25         # More frequent summaries (Phase 1 optimization)
+  
+  # Phase 3: Rate limiting by event type
+  file_event_rate_per_minute: 3      # Tighter rate limiting (Phase 1 optimization)
+  process_event_rate_per_minute: 10
+  network_event_rate_per_minute: 20
+  security_alert_rate_per_hour: 5
+  
+  # Phase 2 Enhancements: Pattern-based deduplication
+  microsecond_deduplication_window_ms: 100  # 100ms for rapid duplicates
+  enable_subsecond_deduplication: true      # Enable sub-second duplicate detection
+  rapid_duplicate_threshold: 3              # 3 identical events within microsecond window
+  
+  # Enhanced content similarity detection
+  enable_content_similarity_detection: true # Detect near-identical content
+  content_similarity_threshold: 0.95        # 95% similarity threshold
+  similarity_window_secs: 60                # 1 minute window for similarity detection
+  
+  # Adaptive rate limiting based on behavior patterns  
+  enable_adaptive_rate_limiting: true       # Adjust rates based on patterns
+  noise_pattern_detection_window: 300       # 5 minutes to detect noise patterns
+  noise_threshold_multiplier: 2.0           # Reduce rate by half when noise detected
+  
+  # Memory management
+  max_hash_cache_size: 10000
+  max_burst_states: 1000
+  cleanup_interval_secs: 300
+  max_microsecond_cache_size: 5000          # Sub-second deduplication cache
+  max_similarity_cache_size: 3000           # Content similarity cache
 storage:
   local_storage:
     enabled: true

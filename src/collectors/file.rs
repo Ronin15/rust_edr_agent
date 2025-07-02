@@ -26,13 +26,13 @@ struct FileState {
     event_count: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileCollector {
-    config: FileMonitorConfig,
+    config: Arc<FileMonitorConfig>,
     event_sender: mpsc::Sender<Event>,
     is_running: Arc<RwLock<bool>>,
-    hostname: String,
-    agent_id: String,
+    hostname: Arc<str>,
+    agent_id: Arc<str>,
     events_collected: Arc<RwLock<u64>>,
     last_error: Arc<RwLock<Option<String>>>,
     // File event deduplication to prevent noise from busy file systems
@@ -44,15 +44,16 @@ impl FileCollector {
         config: FileMonitorConfig,
         event_sender: mpsc::Sender<Event>,
     ) -> Result<Self> {
-        let hostname = hostname::get()
+        let hostname: Arc<str> = hostname::get()
             .unwrap_or_default()
             .to_string_lossy()
-            .to_string();
+            .to_string()
+            .into();
         
-        let agent_id = uuid::Uuid::new_v4().to_string();
+        let agent_id: Arc<str> = uuid::Uuid::new_v4().to_string().into();
         
         Ok(Self {
-            config,
+            config: Arc::new(config),
             event_sender,
             is_running: Arc::new(RwLock::new(false)),
             hostname,
@@ -129,8 +130,8 @@ impl FileCollector {
         Event::new(
             event_type,
             "file_monitor".to_string(),
-            self.hostname.clone(),
-            self.agent_id.clone(),
+            self.hostname.to_string(),
+            self.agent_id.to_string(),
             data,
         )
     }
@@ -280,20 +281,6 @@ impl Collector for FileCollector {
     }
 }
 
-impl Clone for FileCollector {
-    fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            event_sender: self.event_sender.clone(),
-            is_running: self.is_running.clone(),
-            hostname: self.hostname.clone(),
-            agent_id: self.agent_id.clone(),
-            events_collected: self.events_collected.clone(),
-            last_error: self.last_error.clone(),
-            file_states: self.file_states.clone(),
-        }
-    }
-}
 
 #[async_trait::async_trait]
 impl EventCollector for FileCollector {

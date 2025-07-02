@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -13,6 +14,12 @@ pub struct Event {
     pub agent_id: String,
     pub data: EventData,
     pub metadata: HashMap<String, String>,
+
+    // Security-aware deduplication fields
+    #[serde(skip)]
+    pub content_hash: Option<String>,
+    #[serde(skip)]
+    pub security_critical: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -160,7 +167,7 @@ impl Event {
         agent_id: String,
         data: EventData,
     ) -> Self {
-        Self {
+        let mut event = Self {
             id: Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
             event_type,
@@ -169,7 +176,13 @@ impl Event {
             agent_id,
             data,
             metadata: HashMap::new(),
-        }
+            content_hash: None, 
+            security_critical: false,
+        };
+
+        event.content_hash = Some(event.generate_content_hash());
+        event.security_critical = event.is_security_critical();
+        event
     }
     
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
@@ -211,6 +224,40 @@ impl Event {
             EventType::SecurityAlert => EventSeverity::Critical,
             _ => EventSeverity::Low,
         }
+    }
+
+    /// Generate a hash of the event content for deduplication
+    pub fn generate_content_hash(&self) -> String {
+        // Create a serializable version of the event data, excluding volatile fields
+        let mut hasher = Sha256::new();
+        hasher.update(self.source.as_bytes());
+        hasher.update(self.hostname.as_bytes());
+        hasher.update(self.agent_id.as_bytes());
+        // Add more fields to the hash as needed for robust deduplication
+        // For now, we are keeping it simple
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Determine if the event is security-critical and should bypass some deduplication
+    pub fn is_security_critical(&self) -> bool {
+        // High-severity events are always critical
+        if matches!(self.get_severity(), EventSeverity::High | EventSeverity::Critical) {
+            return true;
+        }
+        
+        // Check for security-sensitive file paths
+        if let EventData::File(file_data) = &self.data {
+            let path = file_data.path.to_lowercase();
+            let critical_paths = [
+                "/etc/", "/boot/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/",
+                "/.ssh/", "c:\\windows\\system32",
+            ];
+            if critical_paths.iter().any(|p| path.starts_with(p)) {
+                return true;
+            }
+        }
+        
+        false
     }
 }
 

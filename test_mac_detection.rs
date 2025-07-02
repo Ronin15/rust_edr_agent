@@ -258,6 +258,8 @@ fn create_test_process_event(
             hashes: None,
         }),
         metadata: HashMap::new(),
+        content_hash: None,
+        security_critical: false,
     };
     
     Ok(event)
@@ -294,6 +296,8 @@ fn create_test_process_event_with_cmdline(
             hashes: None,
         }),
         metadata: HashMap::new(),
+        content_hash: None,
+        security_critical: false,
     };
     
     Ok(event)
@@ -345,6 +349,8 @@ fn create_process_with_api_calls(
             hashes: None,
         }),
         metadata,
+        content_hash: None,
+        security_critical: false,
     };
     
     Ok(event)

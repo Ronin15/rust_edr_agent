@@ -1,6 +1,7 @@
 // EDR Agent Library
 pub mod config;
 pub mod agent;
+pub mod deduplication;
 pub mod events;
 pub mod storage;
 pub mod network;

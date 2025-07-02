@@ -175,7 +175,7 @@ impl DnsAnomalyDetector {
         agent_id: String,
         hostname: String,
     ) -> Result<Self> {
-        let detection_rules = Self::create_detection_rules_from_config(&config);
+        let detection_rules = Self::create_detection_rules_from_config(config.clone());
         
         Ok(Self {
             config,
@@ -189,21 +189,21 @@ impl DnsAnomalyDetector {
         })
     }
 
-    fn create_detection_rules_from_config(config: &DnsAnomalyDetectorConfig) -> DnsDetectionRules {
+    fn create_detection_rules_from_config(config: DnsAnomalyDetectorConfig) -> DnsDetectionRules {
         let mut alert_frequency_limits = HashMap::new();
 
-        // Use config values to populate frequency limits
-        for (key, limit) in &config.alert_frequency_limits {
-            alert_frequency_limits.insert(key.clone(), FrequencyLimit {
+        // Use config values to populate frequency limits - avoid cloning keys
+        for (key, limit) in config.alert_frequency_limits {
+            alert_frequency_limits.insert(key, FrequencyLimit {
                 max_alerts_per_hour: limit.max_alerts_per_hour,
                 cooldown_multiplier: limit.cooldown_multiplier,
             });
         }
 
-        // Convert Vec<String> to HashSet<String> for domains and providers
-        let known_malicious_domains: HashSet<String> = config.known_malicious_domains.iter().cloned().collect();
-        let known_c2_domains: HashSet<String> = config.known_c2_domains.iter().cloned().collect();
-        let dns_over_https_providers: HashSet<String> = config.dns_over_https_providers.iter().cloned().collect();
+        // Convert Vec<String> to HashSet<String> for domains and providers - avoid cloning
+        let known_malicious_domains: HashSet<String> = config.known_malicious_domains.into_iter().collect();
+        let known_c2_domains: HashSet<String> = config.known_c2_domains.into_iter().collect();
+        let dns_over_https_providers: HashSet<String> = config.dns_over_https_providers.into_iter().collect();
 
         // Default suspicious query types
         let suspicious_query_types = vec![
@@ -217,7 +217,7 @@ impl DnsAnomalyDetector {
             max_queries_per_minute: config.max_queries_per_minute,
             max_queries_per_hour: config.max_queries_per_hour,
             max_unique_domains_per_hour: config.max_unique_domains_per_hour,
-            suspicious_domain_patterns: config.suspicious_domain_patterns.clone(),
+            suspicious_domain_patterns: config.suspicious_domain_patterns,
             known_malicious_domains,
             known_c2_domains,
             base64_detection_threshold: config.base64_detection_threshold,

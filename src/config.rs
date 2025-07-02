@@ -2,12 +2,14 @@ use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
 use std::path::PathBuf;
 use std::collections::HashMap;
+use crate::deduplication::DeduplicationConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub agent: AgentConfig,
     pub collectors: CollectorsConfig,
     pub detectors: DetectorsConfig,
+    pub deduplication: DeduplicationConfig,
     pub storage: StorageConfig,
     pub network: NetworkConfig,
     pub logging: LoggingConfig,
@@ -533,6 +535,7 @@ impl Default for Config {
                     ],
                 },
             },
+            deduplication: DeduplicationConfig::default(),
             storage: StorageConfig {
                 local_storage: LocalStorageConfig {
                     enabled: true,

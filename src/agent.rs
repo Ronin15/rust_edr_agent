@@ -64,7 +64,7 @@ impl Agent {
             DetectorManager::new(
                 config.detectors.clone(),
                 alert_sender,
-                agent_id,
+                agent_id, 
                 hostname,
             )
             .await
@@ -305,15 +305,15 @@ impl Agent {
     
     async fn store_alert(&self, alert: &DetectorAlert) -> Result<()> {
         // Get hostname and agent_id from self.config since they are not in DetectorAlert
-        let hostname = self.config.agent.hostname.clone().unwrap_or_else(|| "localhost".to_string());
-        let agent_id = self.config.agent.agent_id.clone().unwrap_or_else(|| "unknown".to_string());
+        let hostname = self.config.agent.hostname.as_deref().unwrap_or("localhost");
+        let agent_id = self.config.agent.agent_id.as_deref().unwrap_or("unknown");
         
         // Convert alert to event for storage
         let alert_event = Event::new(
             crate::events::EventType::SecurityAlert,
             format!("detector_{}", alert.detector_name),
-            hostname,
-            agent_id,
+            hostname.to_string(),
+            agent_id.to_string(),
             crate::events::EventData::System(
                 crate::events::SystemEventData {
                     event_id: None,
@@ -408,8 +408,8 @@ impl Agent {
     pub async fn get_status(&self) -> AgentStatus {
         AgentStatus {
             is_running: *self.is_running.read().await,
-            agent_id: self.config.agent.agent_id.clone().unwrap_or_default(),
-            hostname: self.config.agent.hostname.clone().unwrap_or_default(),
+            agent_id: self.config.agent.agent_id.as_deref().unwrap_or("").to_string(),
+            hostname: self.config.agent.hostname.as_deref().unwrap_or("").to_string(),
             uptime: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default(),

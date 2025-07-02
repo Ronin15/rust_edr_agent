@@ -66,16 +66,16 @@ enum ConnectionEvent {
 
 // Constants moved inline to avoid 'dead code' warnings
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NetworkCollector {
-    config: NetworkMonitorConfig,
+    config: Arc<NetworkMonitorConfig>,
     event_sender: mpsc::Sender<Event>,
     is_running: Arc<RwLock<bool>>,
-    hostname: String,
-    agent_id: String,
+    hostname: Arc<str>,
+    agent_id: Arc<str>,
     events_collected: Arc<RwLock<u64>>,
     last_error: Arc<RwLock<Option<String>>>,
-    // Connection lifecycle tracking - preserves duration and state changes
+    // Stateful connection tracking
     connection_states: Arc<RwLock<HashMap<ConnectionKey, ConnectionState>>>,
 }
 
@@ -84,15 +84,16 @@ impl NetworkCollector {
         config: NetworkMonitorConfig,
         event_sender: mpsc::Sender<Event>,
     ) -> Result<Self> {
-        let hostname = hostname::get()
+        let hostname: Arc<str> = hostname::get()
             .unwrap_or_default()
             .to_string_lossy()
-            .to_string();
+            .to_string()
+            .into();
         
-        let agent_id = uuid::Uuid::new_v4().to_string();
+        let agent_id: Arc<str> = uuid::Uuid::new_v4().to_string().into();
         
         Ok(Self {
-            config,
+            config: Arc::new(config),
             event_sender,
             is_running: Arc::new(RwLock::new(false)),
             hostname,
@@ -123,8 +124,8 @@ impl NetworkCollector {
         Event::new(
             EventType::NetworkConnection,
             "network_monitor".to_string(),
-            self.hostname.clone(),
-            self.agent_id.clone(),
+            self.hostname.to_string(),
+            self.agent_id.to_string(),
             data,
         )
     }
@@ -1050,8 +1051,8 @@ impl NetworkCollector {
         let mut event = Event::new(
             EventType::NetworkDnsQuery,
             "high_throughput_dns_monitor".to_string(),
-            self.hostname.clone(),
-            self.agent_id.clone(),
+            self.hostname.to_string(),
+            self.agent_id.to_string(),
             data,
         );
         
@@ -1116,20 +1117,6 @@ impl Collector for NetworkCollector {
     }
 }
 
-impl Clone for NetworkCollector {
-    fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            event_sender: self.event_sender.clone(),
-            is_running: self.is_running.clone(),
-            hostname: self.hostname.clone(),
-            agent_id: self.agent_id.clone(),
-            events_collected: self.events_collected.clone(),
-            last_error: self.last_error.clone(),
-            connection_states: self.connection_states.clone(),
-        }
-    }
-}
 
 #[async_trait::async_trait]
 impl PeriodicCollector for NetworkCollector {

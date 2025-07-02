@@ -199,8 +199,8 @@ impl CollectorManager {
             .collect()
     }
     
-    pub fn get_event_sender(&self) -> mpsc::Sender<Event> {
-        self.event_sender.clone()
+    pub fn get_event_sender(&self) -> &mpsc::Sender<Event> {
+        &self.event_sender
     }
     
     pub fn get_config(&self) -> &CollectorsConfig {
