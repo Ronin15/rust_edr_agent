@@ -232,8 +232,6 @@ impl Agent {
     }
     
     async fn process_alerts(&self, mut alert_receiver: mpsc::Receiver<DetectorAlert>) -> Result<()> {
-        info!("Starting alert processing");
-        
         while *self.is_running.read().await {
             tokio::select! {
                 alert_opt = alert_receiver.recv() => {

@@ -413,29 +413,37 @@ impl FileCollector {
         Ok(())
     }
     
-    /// Intelligent file event deduplication to prevent noise from busy file systems
+    /// Security-first file event deduplication
     async fn should_report_file_event(&self, file_path: &str, event_type: &EventType) -> bool {
+        // SECURITY PRIORITY: Never filter security-critical file paths
+        if self.is_security_critical_file(file_path) {
+            return true;
+        }
+        
         let mut states = self.file_states.write().await;
         let now = Instant::now();
         
-        // Memory management: limit to 1000 file states max
-        if states.len() >= 1000 {
-            // Remove oldest entries
-            let mut entries: Vec<_> = states.iter().map(|(k, v)| (k.clone(), v.last_event_time)).collect();
+        // Memory management: limit to 2000 file states max (increased for security)
+        if states.len() >= 2000 {
+            // Remove oldest entries but preserve security-critical ones
+            let mut entries: Vec<_> = states.iter()
+                .filter(|(path, _)| !self.is_security_critical_file(path))
+                .map(|(k, v)| (k.clone(), v.last_event_time))
+                .collect();
             entries.sort_by_key(|(_, time)| *time);
-            let to_remove = entries.len() - 800; // Keep 800, remove rest
+            let to_remove = entries.len().saturating_sub(1500); // Keep 1500 non-critical
             for (key, _) in entries.iter().take(to_remove) {
                 states.remove(key);
             }
-            debug!("File state cleanup: removed {} old entries", to_remove);
+            debug!("File state cleanup: removed {} old entries (preserved security-critical)", to_remove);
         }
         
         // Always report security-critical events
-        let is_security_critical = matches!(event_type, 
+        let is_security_critical_event = matches!(event_type, 
             EventType::FileCreated | EventType::FileDeleted
-        );
+        ) || self.is_executable_file(file_path) || self.is_config_file(file_path);
         
-        if is_security_critical {
+        if is_security_critical_event {
             // Update state but always report
             states.insert(file_path.to_string(), FileState {
                 last_event_time: now,
@@ -445,29 +453,29 @@ impl FileCollector {
             return true;
         }
         
-        // For modifications and access events, apply intelligent deduplication
+        // For modifications and access events, apply conservative deduplication
         if let Some(file_state) = states.get_mut(file_path) {
             let time_since_last = now.duration_since(file_state.last_event_time);
             
-            // If same event type within 30 seconds, check frequency
-            if file_state.last_event_type == *event_type && time_since_last < Duration::from_secs(30) {
+            // Shorter deduplication window for better security (15 seconds instead of 30)
+            if file_state.last_event_type == *event_type && time_since_last < Duration::from_secs(15) {
                 file_state.event_count += 1;
                 
-                // Rate limiting for noisy files
+                // More conservative rate limiting (reports more events)
                 let should_skip = match file_state.event_count {
-                    1..=3 => false, // First 3 events always reported
-                    4..=10 => file_state.event_count % 3 != 0, // Every 3rd event
-                    11..=50 => file_state.event_count % 10 != 0, // Every 10th event
-                    _ => file_state.event_count % 50 != 0, // Every 50th event for very noisy files
+                    1..=5 => false, // First 5 events always reported (increased from 3)
+                    6..=15 => file_state.event_count % 2 != 0, // Every 2nd event (more frequent)
+                    16..=50 => file_state.event_count % 5 != 0, // Every 5th event
+                    _ => file_state.event_count % 20 != 0, // Every 20th event (more frequent than before)
                 };
                 
                 if should_skip {
-                    debug!("Rate limiting file events for {}: {} events in last 30s", 
+                    debug!("Conservative rate limiting for {}: {} events in last 15s", 
                            file_path, file_state.event_count);
                     return false;
                 }
-            } else if time_since_last >= Duration::from_secs(30) {
-                // Reset counter if it's been 30+ seconds
+            } else if time_since_last >= Duration::from_secs(15) {
+                // Reset counter after shorter period
                 file_state.event_count = 1;
             }
             
@@ -485,5 +493,51 @@ impl FileCollector {
             });
             true
         }
+    }
+    
+    /// Identify security-critical file paths that should never be filtered
+    fn is_security_critical_file(&self, file_path: &str) -> bool {
+        let critical_patterns = [
+            // System binaries and libraries
+            "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/",
+            "/System/Library/", "/usr/lib/", "/usr/libexec/",
+            // SSH and authentication
+            "/.ssh/", "/etc/ssh/", "/etc/passwd", "/etc/shadow", "/etc/sudoers",
+            // System configuration
+            "/etc/", "/boot/", "/var/log/",
+            // User home directories (executable areas)
+            "/Users/", "/home/",
+            // Temporary execution areas
+            "/tmp/", "/var/tmp/", "/dev/shm/",
+            // Application directories
+            "/Applications/", "/opt/",
+            // Windows equivalent paths
+            "C:\\Windows\\System32", "C:\\Program Files", "C:\\Users\\",
+        ];
+        
+        critical_patterns.iter().any(|pattern| file_path.contains(pattern))
+    }
+    
+    /// Check if file is executable (higher security priority)
+    fn is_executable_file(&self, file_path: &str) -> bool {
+        let executable_extensions = [
+            ".exe", ".dll", ".so", ".dylib", ".app", ".deb", ".rpm",
+            ".sh", ".bash", ".zsh", ".py", ".pl", ".rb", ".js",
+            ".bin", ".run", ".com", ".scr", ".bat", ".cmd", ".ps1"
+        ];
+        
+        let path_lower = file_path.to_lowercase();
+        executable_extensions.iter().any(|ext| path_lower.ends_with(ext))
+    }
+    
+    /// Check if file is a configuration file (security relevant)
+    fn is_config_file(&self, file_path: &str) -> bool {
+        let config_patterns = [
+            ".conf", ".cfg", ".ini", ".yaml", ".yml", ".json", ".toml",
+            "config", "settings", ".env", ".plist", ".profile", ".bashrc", ".zshrc"
+        ];
+        
+        let path_lower = file_path.to_lowercase();
+        config_patterns.iter().any(|pattern| path_lower.contains(pattern))
     }
 }

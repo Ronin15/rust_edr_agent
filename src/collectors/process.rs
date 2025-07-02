@@ -127,15 +127,19 @@ impl ProcessCollector {
             };
             
             if !previous_processes.contains_key(&pid_val) {
-                // New process detected - ALWAYS report (security critical)
-                debug!("New process detected: {} (PID: {})", process_info.name, pid_val);
+                // New process detected - apply smart filtering
+                let should_report = self.should_report_process_event(&process_info, &EventType::ProcessCreated).await;
+                
+                if should_report {
+                    debug!("New process detected: {} (PID: {})", process_info.name, pid_val);
                 
                 let event = self.create_process_event(
                     EventType::ProcessCreated,
                     &process_info,
                     process,
                 );
-                events.push(event);
+            events.push(event);
+                }
                 
                 previous_processes.insert(pid_val, process_info);
             } else {
@@ -253,6 +257,296 @@ impl ProcessCollector {
             self.agent_id.clone(),
             data,
         )
+    }
+    
+    /// Cross-platform security-aware process filtering with compromise detection
+    /// This method specifically accounts for legitimate processes that become compromised
+    async fn should_report_process_event(&self, process_info: &ProcessInfo, event_type: &EventType) -> bool {
+        // Always report process terminations
+        if matches!(event_type, EventType::ProcessTerminated) {
+            return true;
+        }
+        
+        let name = process_info.name.to_lowercase();
+        let path = process_info.path.to_lowercase();
+        
+        // ⚠️ CRITICAL: Check for signs of process compromise in legitimate processes
+        if self.detect_process_compromise(process_info) {
+            return true; // ALWAYS report potentially compromised processes
+        }
+        
+        // Platform-specific security-critical processes
+        #[cfg(target_os = "windows")]
+        {
+            // Windows security-critical processes
+            let critical_processes = [
+                "lsass", "winlogon", "csrss", "services", "svchost", "explorer",
+                "dwm", "wininit", "smss", "session", "conhost", "rundll32",
+                "powershell", "cmd", "wmiprvse", "taskhost", "spoolsv",
+            ];
+            
+            let critical_paths = [
+                "c:\\windows\\system32", "c:\\windows\\syswow64", 
+                "c:\\program files", "c:\\windows\\temp",
+            ];
+            
+            for process in &critical_processes {
+                if name.contains(process) {
+                    return true;
+                }
+            }
+            
+            for crit_path in &critical_paths {
+                if path.starts_with(crit_path) {
+                    return true;
+                }
+            }
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            // macOS security-critical processes
+            let critical_processes = [
+                "kernel", "launchd", "kextd", "securityd", "loginwindow",
+                "windowserver", "coreauthd", "sudo", "su", "ssh", "sshd",
+                "opendirectoryd", "systemuiserver", "finder", "dock",
+            ];
+            
+            let critical_paths = [
+                "/system/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/",
+                "/applications/", "/library/", "/tmp/", "/var/tmp/",
+            ];
+            
+            for process in &critical_processes {
+                if name.contains(process) {
+                    return true;
+                }
+            }
+            
+            for crit_path in &critical_paths {
+                if path.starts_with(crit_path) {
+                    return true;
+                }
+            }
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            // Linux security-critical processes
+            let critical_processes = [
+                "init", "systemd", "kernel", "kthread", "sudo", "su", "ssh", "sshd",
+                "cron", "rsyslog", "dbus", "networkmanager", "firewalld",
+                "apache", "nginx", "mysql", "postgres", "docker", "containerd",
+            ];
+            
+            let critical_paths = [
+                "/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/local/bin/",
+                "/etc/", "/tmp/", "/var/tmp/", "/dev/shm/", "/proc/",
+            ];
+            
+            for process in &critical_processes {
+                if name.contains(process) {
+                    return true;
+                }
+            }
+            
+            for crit_path in &critical_paths {
+                if path.starts_with(crit_path) {
+                    return true;
+                }
+            }
+        }
+        
+        // Cross-platform checks
+        // High resource usage (potential malware)
+        if process_info.cpu_usage > 80.0 || process_info.memory_usage > 500_000_000 {
+            return true;
+        }
+        
+        // Executable files
+        if path.ends_with(".exe") || path.ends_with(".com") || path.ends_with(".bat") ||
+           path.ends_with(".sh") || path.ends_with(".py") || path.ends_with(".pl") {
+            return true;
+        }
+        
+        // Default: don't report (reduces noise)
+        false
+    }
+    
+    /// 🛡️ CRITICAL SECURITY FUNCTION: Detect signs of process compromise
+    /// This detects when legitimate processes have been hijacked, injected, or hollowed
+    fn detect_process_compromise(&self, process_info: &ProcessInfo) -> bool {
+        let name = &process_info.name.to_lowercase();
+        let path = &process_info.path.to_lowercase();
+        
+        // 1. ⚠️ PROCESS HOLLOWING: Legitimate process name but running from wrong location
+        if self.is_legitimate_process_name(name) {
+            if !self.is_expected_process_location(name, path) {
+                debug!("🚨 COMPROMISE DETECTED: {} running from unexpected location: {}", name, path);
+                return true;
+            }
+        }
+        
+        // 2. ⚠️ DLL HIJACKING: Common legitimate processes in user-writable directories
+        let user_writable_dirs = [
+            "/tmp/", "/var/tmp/", "/dev/shm/", // Linux/macOS
+            "c:\\temp", "c:\\users", "c:\\windows\\temp", // Windows
+            "/users/", "/downloads/", "/.cache/", // macOS/Linux user dirs
+        ];
+        
+        for dir in &user_writable_dirs {
+            if path.contains(dir) && self.is_system_or_browser_process(name) {
+                debug!("🚨 COMPROMISE DETECTED: System/browser process {} in user-writable directory: {}", name, path);
+                return true;
+            }
+        }
+        
+        // 3. ⚠️ MEMORY INJECTION: Unusual resource usage for known processes
+        if self.has_unusual_resource_usage(name, process_info.cpu_usage, process_info.memory_usage) {
+            debug!("🚨 COMPROMISE DETECTED: {} has unusual resource usage (CPU: {:.1}%, Memory: {} MB)", 
+                   name, process_info.cpu_usage, process_info.memory_usage / 1_000_000);
+            return true;
+        }
+        
+        // 4. ⚠️ SUPPLY CHAIN COMPROMISE: Browser processes in unusual locations
+        if self.is_browser_process(name) && !self.is_legitimate_browser_location(path) {
+            debug!("🚨 COMPROMISE DETECTED: Browser process {} in unusual location: {}", name, path);
+            return true;
+        }
+        
+        false
+    }
+    
+    /// Check if this is a legitimate process name that attackers commonly target
+    fn is_legitimate_process_name(&self, name: &str) -> bool {
+        let commonly_targeted = [
+            // System processes commonly targeted for hollowing
+            "svchost", "explorer", "winlogon", "lsass", "csrss",
+            "systemd", "init", "launchd", "finder", "dock",
+            // Browsers commonly targeted for injection
+            "chrome", "firefox", "safari", "edge", "opera", "brave",
+            // Common utilities targeted for masquerading
+            "notepad", "calc", "mspaint", "cmd", "powershell",
+            "bash", "sh", "zsh", "terminal", "iterm",
+        ];
+        
+        commonly_targeted.iter().any(|&target| name.contains(target))
+    }
+    
+    /// Check if a legitimate process is running from its expected location
+    fn is_expected_process_location(&self, name: &str, path: &str) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            let windows_expectations = [
+                ("svchost", "c:\\windows\\system32"),
+                ("explorer", "c:\\windows"),
+                ("lsass", "c:\\windows\\system32"),
+                ("winlogon", "c:\\windows\\system32"),
+                ("csrss", "c:\\windows\\system32"),
+            ];
+            
+            for (proc_name, expected_path) in &windows_expectations {
+                if name.contains(proc_name) {
+                    return path.starts_with(expected_path);
+                }
+            }
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            let macos_expectations = [
+                ("finder", "/system/library/coreservices"),
+                ("dock", "/system/library/coreservices"),
+                ("launchd", "/sbin"),
+                ("windowserver", "/system/library"),
+                ("loginwindow", "/system/library/coreservices"),
+            ];
+            
+            for (proc_name, expected_path) in &macos_expectations {
+                if name.contains(proc_name) {
+                    return path.starts_with(expected_path);
+                }
+            }
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            let linux_expectations = [
+                ("systemd", "/lib/systemd"),
+                ("init", "/sbin"),
+                ("dbus", "/usr/bin"),
+                ("networkmanager", "/usr/sbin"),
+            ];
+            
+            for (proc_name, expected_path) in &linux_expectations {
+                if name.contains(proc_name) {
+                    return path.starts_with(expected_path);
+                }
+            }
+        }
+        
+        true // If not in our list, assume it's okay
+    }
+    
+    /// Check if this is a system or browser process that shouldn't be in user directories
+    fn is_system_or_browser_process(&self, name: &str) -> bool {
+        let system_browsers = [
+            "svchost", "lsass", "winlogon", "explorer", "csrss",
+            "systemd", "init", "launchd", "finder", "dock",
+            "chrome", "firefox", "safari", "edge", "opera",
+        ];
+        
+        system_browsers.iter().any(|&proc| name.contains(proc))
+    }
+    
+    /// Detect unusual resource usage that might indicate injection or compromise
+    fn has_unusual_resource_usage(&self, name: &str, cpu_usage: f32, memory_usage: u64) -> bool {
+        // Define baseline expectations for common processes
+        let baselines = [
+            ("svchost", 2.0, 50_000_000),      // Usually low CPU, moderate memory
+            ("explorer", 1.0, 100_000_000),    // Usually very low CPU
+            ("notepad", 0.5, 20_000_000),      // Minimal resources
+            ("calc", 0.5, 15_000_000),         // Calculator should be tiny
+            ("finder", 1.0, 50_000_000),       // macOS Finder
+            ("dock", 0.5, 30_000_000),         // macOS Dock
+        ];
+        
+        for (proc_name, max_cpu, max_memory) in &baselines {
+            if name.contains(proc_name) {
+                // Allow some variance but flag extreme deviations
+                let cpu_threshold = max_cpu * 5.0;  // 5x normal CPU usage
+                let memory_threshold = max_memory * 3; // 3x normal memory usage
+                
+                if cpu_usage > cpu_threshold || memory_usage > memory_threshold {
+                    return true;
+                }
+            }
+        }
+        
+        false
+    }
+    
+    /// Check if browser is in legitimate location
+    fn is_browser_process(&self, name: &str) -> bool {
+        let browsers = ["chrome", "firefox", "safari", "edge", "opera", "brave"];
+        browsers.iter().any(|&browser| name.contains(browser))
+    }
+    
+    fn is_legitimate_browser_location(&self, path: &str) -> bool {
+        let legitimate_browser_paths = [
+            // Windows
+            "c:\\program files\\google\\chrome",
+            "c:\\program files\\mozilla firefox",
+            "c:\\program files\\microsoft\\edge",
+            // macOS
+            "/applications/google chrome.app",
+            "/applications/firefox.app",
+            "/applications/safari.app",
+            // Linux
+            "/usr/bin/", "/opt/", "/snap/", "/flatpak/",
+        ];
+        
+        legitimate_browser_paths.iter().any(|&legit_path| path.starts_with(legit_path))
     }
     
     fn create_termination_event(&self, process_info: &ProcessInfo) -> Event {
