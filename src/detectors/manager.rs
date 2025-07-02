@@ -3,7 +3,7 @@ use tracing::{info, warn, error};
 use tokio::sync::mpsc;
 
 use crate::config::DetectorsConfig;
-use crate::events::Event;
+use crate::events::{Event, AlertSeverity};
 #[derive(Debug, Clone)]
 pub struct DetectorStatus {
     pub name: String,
@@ -129,26 +129,6 @@ pub struct DetectorAlert {
     pub metadata: std::collections::HashMap<String, String>,
 }
 
-#[derive(Debug, Clone)]
-pub enum AlertSeverity {
-    Info,
-    Low,
-    Medium,
-    High,
-    Critical,
-}
-
-impl AlertSeverity {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            AlertSeverity::Info => "info",
-            AlertSeverity::Low => "low",
-            AlertSeverity::Medium => "medium",
-            AlertSeverity::High => "high",
-            AlertSeverity::Critical => "critical",
-        }
-    }
-}
 
 impl DetectorManager {
     pub async fn new(

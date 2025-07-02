@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 use chrono::Utc;
 
-use crate::events::{Event, EventData, RegistryEventData};
-use crate::detectors::{Detector, DetectorAlert, AlertSeverity, DetectorStatus};
+use crate::events::{Event, EventData, RegistryEventData, AlertSeverity};
+use crate::detectors::{Detector, DetectorAlert, DetectorStatus};
 use crate::config::RegistryMonitorConfig;
 
 #[derive(Debug)]
@@ -63,7 +63,7 @@ pub struct RegistryEvent {
     pub new_value: Option<String>,
     pub process_id: Option<u32>,
     pub process_name: Option<String>,
-    pub severity: RegistryThreatSeverity,
+    pub severity: AlertSeverity,
     pub risk_score: f32,
 }
 
@@ -81,14 +81,6 @@ pub enum RegistryEventType {
     SuspiciousValueChange,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RegistryThreatSeverity {
-    Info,
-    Low,
-    Medium,
-    High,
-    Critical,
-}
 
 #[derive(Debug)]
 pub struct RegistryDetectionRules {
@@ -105,7 +97,7 @@ pub struct RegistryDetectionRules {
 pub struct PersistenceRule {
     pub name: String,
     pub description: String,
-    pub severity: RegistryThreatSeverity,
+    pub severity: AlertSeverity,
     pub risk_score: f32,
     pub legitimate_processes: Vec<String>, // Processes that can legitimately modify this key
     pub alert_threshold: u32, // Number of changes before alerting
@@ -115,7 +107,7 @@ pub struct PersistenceRule {
 pub struct SecurityRule {
     pub name: String,
     pub description: String,
-    pub severity: RegistryThreatSeverity,
+    pub severity: AlertSeverity,
     pub risk_score: f32,
     pub protected_values: Vec<String>, // Values that should never change
     pub whitelist_processes: Vec<String>,
@@ -125,7 +117,7 @@ pub struct SecurityRule {
 pub struct SystemRule {
     pub name: String,
     pub description: String,
-    pub severity: RegistryThreatSeverity,
+    pub severity: AlertSeverity,
     pub risk_score: f32,
     pub change_window: Duration, // Legitimate changes should be infrequent
     pub max_changes_per_window: u32,
@@ -136,7 +128,7 @@ pub struct MalwareIndicator {
     pub name: String,
     pub key_patterns: Vec<String>, // Regex patterns for suspicious keys
     pub value_patterns: Vec<String>, // Regex patterns for suspicious values
-    pub severity: RegistryThreatSeverity,
+    pub severity: AlertSeverity,
     pub risk_score: f32,
     pub description: String,
 }
@@ -147,7 +139,7 @@ pub struct SuspiciousPattern {
     pub key_pattern: String,
     pub value_pattern: Option<String>,
     pub process_pattern: Option<String>,
-    pub severity: RegistryThreatSeverity,
+    pub severity: AlertSeverity,
     pub risk_score: f32,
     pub description: String,
 }
@@ -194,7 +186,7 @@ impl RegistryDetector {
             PersistenceRule {
                 name: "Run Key Persistence".to_string(),
                 description: "Modification to Run registry key - common persistence mechanism".to_string(),
-                severity: RegistryThreatSeverity::High,
+                severity: AlertSeverity::High,
                 risk_score: 0.8,
                 legitimate_processes: vec!["installer.exe".to_string(), "setup.exe".to_string()],
                 alert_threshold: 1,
@@ -206,7 +198,7 @@ impl RegistryDetector {
             PersistenceRule {
                 name: "User Run Key Persistence".to_string(),
                 description: "Modification to user Run registry key".to_string(),
-                severity: RegistryThreatSeverity::Medium,
+                severity: AlertSeverity::Medium,
                 risk_score: 0.7,
                 legitimate_processes: vec!["installer.exe".to_string()],
                 alert_threshold: 1,
@@ -218,7 +210,7 @@ impl RegistryDetector {
             PersistenceRule {
                 name: "RunOnce Persistence".to_string(),
                 description: "Modification to RunOnce registry key".to_string(),
-                severity: RegistryThreatSeverity::High,
+                severity: AlertSeverity::High,
                 risk_score: 0.8,
                 legitimate_processes: vec!["installer.exe".to_string(), "setup.exe".to_string()],
                 alert_threshold: 1,
@@ -231,7 +223,7 @@ impl RegistryDetector {
             SecurityRule {
                 name: "SAM Database Access".to_string(),
                 description: "Unauthorized access to Security Account Manager database".to_string(),
-                severity: RegistryThreatSeverity::Critical,
+                severity: AlertSeverity::Critical,
                 risk_score: 0.95,
                 protected_values: vec![],
                 whitelist_processes: vec!["lsass.exe".to_string(), "winlogon.exe".to_string()],
@@ -243,7 +235,7 @@ impl RegistryDetector {
             SecurityRule {
                 name: "LSA Security Settings".to_string(),
                 description: "Modification to Local Security Authority settings".to_string(),
-                severity: RegistryThreatSeverity::High,
+                severity: AlertSeverity::High,
                 risk_score: 0.85,
                 protected_values: vec!["Authentication Packages".to_string()],
                 whitelist_processes: vec!["lsass.exe".to_string()],
@@ -256,7 +248,7 @@ impl RegistryDetector {
             SystemRule {
                 name: "Service Configuration".to_string(),
                 description: "Modification to system services".to_string(),
-                severity: RegistryThreatSeverity::Medium,
+                severity: AlertSeverity::Medium,
                 risk_score: 0.6,
                 change_window: Duration::from_secs(3600), // 1 hour
                 max_changes_per_window: 5,
@@ -277,7 +269,7 @@ impl RegistryDetector {
                 r".*powershell.*-enc.*".to_string(),
                 r".*cmd.*\/c.*".to_string(),
             ],
-            severity: RegistryThreatSeverity::High,
+            severity: AlertSeverity::High,
             risk_score: 0.9,
             description: "Suspicious executable path in startup registry key".to_string(),
         });
@@ -289,7 +281,7 @@ impl RegistryDetector {
                 r".*-enc[oded]*\s+[A-Za-z0-9+/]{20,}.*".to_string(),
                 r".*[A-Za-z0-9+/]{50,}==?.*".to_string(),
             ],
-            severity: RegistryThreatSeverity::High,
+            severity: AlertSeverity::High,
             risk_score: 0.85,
             description: "Base64 encoded command in registry value".to_string(),
         });
@@ -300,7 +292,7 @@ impl RegistryDetector {
             key_pattern: r".*\\(Run|RunOnce).*".to_string(),
             value_pattern: Some(r".*\.(exe|scr|bat|cmd|pif).*".to_string()),
             process_pattern: None,
-            severity: RegistryThreatSeverity::Medium,
+            severity: AlertSeverity::Medium,
             risk_score: 0.6,
             description: "Executable file added to startup registry keys".to_string(),
         });
@@ -310,7 +302,7 @@ impl RegistryDetector {
             key_pattern: r".*\\Services\\.*\\Parameters".to_string(),
             value_pattern: Some(r"ServiceDll".to_string()),
             process_pattern: None,
-            severity: RegistryThreatSeverity::High,
+            severity: AlertSeverity::High,
             risk_score: 0.8,
             description: "Service DLL path modification - potential DLL hijacking".to_string(),
         });
@@ -345,7 +337,7 @@ impl RegistryDetector {
         let key_path = &registry_data.key_path;
         let mut risk_score = 0.0;
         let mut event_type = RegistryEventType::SuspiciousValueChange;
-        let mut severity = RegistryThreatSeverity::Info;
+        let mut severity = AlertSeverity::Info;
 
         // Check against persistence rules
         if let Some(rule) = self.detection_rules.persistence_keys.get(key_path) {
@@ -368,7 +360,7 @@ impl RegistryDetector {
             severity = rule.severity.clone();
             
             // Critical security keys have maximum severity
-            if matches!(rule.severity, RegistryThreatSeverity::Critical) {
+            if matches!(rule.severity, AlertSeverity::Critical) {
                 risk_score = 0.95;
             }
         }
@@ -470,7 +462,7 @@ impl RegistryDetector {
         }
         
         // Always alert for critical severity
-        if matches!(registry_event.severity, RegistryThreatSeverity::Critical) {
+        if matches!(registry_event.severity, AlertSeverity::Critical) {
             return true;
         }
         
@@ -479,13 +471,7 @@ impl RegistryDetector {
     }
 
     async fn create_alert(&self, registry_event: &RegistryEvent) -> DetectorAlert {
-        let severity = match registry_event.severity {
-            RegistryThreatSeverity::Info => AlertSeverity::Info,
-            RegistryThreatSeverity::Low => AlertSeverity::Low,
-            RegistryThreatSeverity::Medium => AlertSeverity::Medium,
-            RegistryThreatSeverity::High => AlertSeverity::High,
-            RegistryThreatSeverity::Critical => AlertSeverity::Critical,
-        };
+        let severity = registry_event.severity.clone();
 
         let title = match registry_event.event_type {
             RegistryEventType::PersistenceMechanism => "Registry Persistence Mechanism Detected",

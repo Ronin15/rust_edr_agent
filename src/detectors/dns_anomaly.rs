@@ -10,7 +10,8 @@ use uuid::Uuid;
 use chrono::Utc;
 
 use crate::events::{Event, EventData, NetworkEventData};
-use crate::detectors::{Detector, DetectorAlert, AlertSeverity, DetectorStatus};
+use crate::detectors::{Detector, DetectorAlert, DetectorStatus};
+use crate::events::AlertSeverity;
 use crate::config::DnsAnomalyDetectorConfig;
 
 #[derive(Debug)]

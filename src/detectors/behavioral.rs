@@ -8,7 +8,8 @@ use tracing::{debug, info};
 use tokio::sync::mpsc;
 
 use crate::events::{Event, EventData, ProcessEventData, FileEventData, NetworkEventData};
-use crate::detectors::{Detector, EventDetector, DetectorAlert, AlertSeverity};
+use crate::detectors::{Detector, EventDetector, DetectorAlert};
+use crate::events::AlertSeverity;
 use crate::detectors::DetectorStatus;
 use crate::config::BehavioralDetectorConfig;
 

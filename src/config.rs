@@ -27,7 +27,6 @@ pub struct CollectorsConfig {
     pub process_monitor: ProcessMonitorConfig,
     pub file_monitor: FileMonitorConfig,
     pub network_monitor: NetworkMonitorConfig,
-    pub registry_monitor: RegistryMonitorConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -507,13 +506,6 @@ impl Default for Config {
                     monitor_dns: true,
                     capture_packets: false,
                     max_packet_size: 1500,
-                },
-                registry_monitor: RegistryMonitorConfig {
-                    enabled: cfg!(windows),
-                    watched_keys: vec![
-                        "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
-                        "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
-                    ],
                 },
             },
             detectors: DetectorsConfig {

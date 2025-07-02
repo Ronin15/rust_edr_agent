@@ -216,11 +216,27 @@ impl Event {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventSeverity {
+    Info,
     Low,
     Medium,
     High,
     Critical,
 }
+
+impl EventSeverity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EventSeverity::Info => "info",
+            EventSeverity::Low => "low",
+            EventSeverity::Medium => "medium",
+            EventSeverity::High => "high",
+            EventSeverity::Critical => "critical",
+        }
+    }
+}
+
+// Unified alert severity for both events and detector alerts
+pub use EventSeverity as AlertSeverity;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EventBatch {
@@ -305,10 +321,11 @@ impl Default for EventBatch {
 
 fn severity_to_level(severity: &EventSeverity) -> u8 {
     match severity {
-        EventSeverity::Low => 0,
-        EventSeverity::Medium => 1,
-        EventSeverity::High => 2,
-        EventSeverity::Critical => 3,
+        EventSeverity::Info => 0,
+        EventSeverity::Low => 1,
+        EventSeverity::Medium => 2,
+        EventSeverity::High => 3,
+        EventSeverity::Critical => 4,
     }
 }
 
