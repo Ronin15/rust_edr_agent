@@ -2,7 +2,7 @@ use anyhow::Result;
 use tracing::{debug, error, info};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
-use sysinfo::{System, Process, Pid};
+use sysinfo::System;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -18,9 +18,7 @@ type ProcessSignature = (u32, u64, String); // (pid, memory, rounded_cpu)
 const MAX_PROCESS_CACHE_ENTRIES: usize = 500; // Hard limit on cache size
 const PROCESS_CACHE_CLEANUP_THRESHOLD: usize = 400; // Start aggressive cleanup at this point
 const PROCESS_CACHE_TTL_SECONDS: u64 = 300; // 5 minutes max TTL
-const PROCESS_DEDUP_WINDOW_SECONDS: u64 = 120; // 2 minute dedup window
-const SIGNIFICANT_CPU_CHANGE: f32 = 10.0; // 10% CPU change
-const SIGNIFICANT_MEMORY_CHANGE: u64 = 10_000_000; // 10MB memory change
+// These constants are embedded inline where used for clarity
 
 #[derive(Debug)]
 pub struct ProcessCollector {
@@ -239,7 +237,7 @@ impl ProcessCollector {
             command_line,
             user: process.user_id().map(|u| u.to_string()),
             session_id: None, // Not available in sysinfo
-            start_time: Some(chrono::Utc::now()), // Approximate
+            start_time: Some(chrono::DateTime::from(process_info.start_time)),
             end_time: None,
             exit_code: None,
             cpu_usage: Some(process_info.cpu_usage),

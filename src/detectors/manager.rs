@@ -17,6 +17,7 @@ pub struct DetectorStatus {
 }
 
 use super::behavioral::BehavioralDetector;
+use super::dns_anomaly::DnsAnomalyDetector;
 
 #[cfg(windows)]
 use super::registry::RegistryDetector;
@@ -25,6 +26,7 @@ use super::registry::RegistryDetector;
 #[derive(Debug)]
 pub enum DetectorInstance {
     Behavioral(BehavioralDetector),
+    DnsAnomaly(DnsAnomalyDetector),
     
     #[cfg(windows)]
     Registry(RegistryDetector),
@@ -37,6 +39,7 @@ impl DetectorInstance {
     pub async fn start(&self) -> Result<()> {
         match self {
             DetectorInstance::Behavioral(d) => d.start().await,
+            DetectorInstance::DnsAnomaly(d) => d.start().await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.start().await,
@@ -46,6 +49,7 @@ impl DetectorInstance {
     pub async fn stop(&self) -> Result<()> {
         match self {
             DetectorInstance::Behavioral(d) => d.stop().await,
+            DetectorInstance::DnsAnomaly(d) => d.stop().await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.stop().await,
@@ -55,6 +59,7 @@ impl DetectorInstance {
     pub async fn is_running(&self) -> bool {
         match self {
             DetectorInstance::Behavioral(d) => d.is_running().await,
+            DetectorInstance::DnsAnomaly(d) => d.is_running().await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.is_running().await,
@@ -64,6 +69,7 @@ impl DetectorInstance {
     pub async fn get_status(&self) -> DetectorStatus {
         match self {
             DetectorInstance::Behavioral(d) => d.get_status().await,
+            DetectorInstance::DnsAnomaly(d) => d.get_status().await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.get_status().await,
@@ -73,6 +79,7 @@ impl DetectorInstance {
     pub fn name(&self) -> &'static str {
         match self {
             DetectorInstance::Behavioral(d) => d.name(),
+            DetectorInstance::DnsAnomaly(d) => d.name(),
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.name(),
@@ -82,6 +89,7 @@ impl DetectorInstance {
     pub async fn process_event(&self, event: &Event) -> Result<()> {
         match self {
             DetectorInstance::Behavioral(d) => d.process_event(event).await,
+            DetectorInstance::DnsAnomaly(d) => d.process_event(event).await,
             
             #[cfg(windows)]
             DetectorInstance::Registry(d) => d.process_event(event).await,
@@ -161,6 +169,18 @@ impl DetectorManager {
                 hostname.clone(),
             ).await?;
             detectors.push(DetectorInstance::Behavioral(detector));
+        }
+        
+        // Initialize DNS anomaly detector
+        if config.dns_anomaly.enabled {
+            info!("Initializing DNS anomaly detector");
+            let detector = DnsAnomalyDetector::new(
+                config.dns_anomaly.clone(),
+                alert_sender.clone(),
+                agent_id.clone(),
+                hostname.clone(),
+            ).await?;
+            detectors.push(DetectorInstance::DnsAnomaly(detector));
         }
         
         // Initialize registry detector (Windows only)
@@ -269,6 +289,10 @@ impl DetectorManager {
     
     pub fn get_alert_sender(&self) -> mpsc::Sender<DetectorAlert> {
         self.alert_sender.clone()
+    }
+    
+    pub fn get_config(&self) -> &DetectorsConfig {
+        &self.config
     }
 }
 

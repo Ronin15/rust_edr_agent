@@ -42,6 +42,12 @@ gunzip -c data/*.json.gz | jq '.events | length' | paste -sd+ | bc
 
 # Search for specific process
 gunzip -c data/*.json.gz | jq '.events[] | select(.data.Process.name == "cargo")'
+
+# View DNS events only
+gunzip -c data/*.json.gz | jq '.events[] | select(.event_type == "NetworkDnsQuery")'
+
+# View security alerts
+gunzip -c data/*.json.gz | jq '.events[] | select(.event_type == "SecurityAlert")'
 ```
 
 ### Monitor in Real-Time

@@ -5,7 +5,6 @@ use edr_agent::config::BehavioralDetectorConfig;
 use edr_agent::events::{Event, EventData, ProcessEventData, EventType};
 use edr_agent::detectors::Detector;
 use chrono::Utc;
-use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

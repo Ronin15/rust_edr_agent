@@ -169,10 +169,21 @@ This document tracks future enhancements and improvements based on the current b
 ## 🎯 Threat Detection & Intelligence
 
 ### Detection Capabilities
+- [x] **DNS Anomaly Detection** ✅ **COMPLETED**
+  - [x] High-frequency DNS query detection
+  - [x] Suspicious domain pattern recognition (DGAs, free TLDs)
+  - [x] DNS tunneling detection (TXT records, large responses)
+  - [x] Command and control communication detection
+  - [x] Data exfiltration monitoring (volume-based)
+  - [x] Real-time domain extraction from system logs
+  - [x] Process-to-DNS query correlation
+  - [x] RFC-compliant domain validation
+  - [x] High-throughput optimization for busy networks
+
 - [ ] **Behavior Analysis**
-  - [ ] Implement process behavior baselines
+  - [x] Implement process behavior baselines (basic)
   - [ ] Add anomaly detection algorithms
-  - [ ] Create rule-based detection engine
+  - [x] Create rule-based detection engine (DNS)
   - [ ] Implement machine learning for threat detection
 
 - [ ] **Threat Intelligence Integration**
@@ -180,12 +191,12 @@ This document tracks future enhancements and improvements based on the current b
   - [ ] Implement IOC (Indicators of Compromise) matching
   - [ ] Integrate with threat intelligence feeds
   - [ ] Add file reputation checking
-  - [ ] Implement network reputation analysis
+  - [x] Implement network reputation analysis (DNS providers)
 
 - [ ] **Advanced Detection**
   - [ ] Implement MITRE ATT&CK technique mapping
   - [ ] Add living-off-the-land detection
-  - [ ] Implement process injection detection
+  - [x] Implement process injection detection (behavioral detector)
   - [ ] Add lateral movement detection
   - [ ] Create alert correlation and chaining
 

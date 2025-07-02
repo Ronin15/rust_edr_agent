@@ -2,13 +2,17 @@
 
 ## 🚀 Quick Start
 
-### Enable Detection Engine
+### Enable Detection Engines
 ```yaml
 # config.yaml
 detectors:
   behavioral:
     enabled: true
     alert_threshold: 0.4
+  dns_anomaly:
+    enabled: true
+    max_queries_per_minute: 5
+    data_exfiltration_threshold_mb_per_hour: 100
 ```
 
 ### View Real-time Alerts
@@ -40,8 +44,10 @@ gunzip -c data/events_*.json.gz | jq '.events[] | select(.event_type == "Securit
 | Feature | Description | Benefit |
 |---------|-------------|---------|
 | **Context-Aware Scoring** | Risk scores adjust based on process location | Reduces false positives |
-| **Frequency Suppression** | Repeated alerts get progressively lower scores | Prevents alert fatigue |
+| **Smart Alert Deduplication** | Type-based frequency limits prevent alert spam | Prevents alert fatigue |
 | **System Process Profiling** | Known system processes get baseline treatment | Focuses on real threats |
+| **DNS Threat Detection** | 6 types of DNS-based threats detected in real-time | Comprehensive DNS security |
+| **EDR-Friendly Monitoring** | No packet capture needed, uses system-level data | Production suitable |
 
 ## ⚙️ Quick Configuration
 

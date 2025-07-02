@@ -1,8 +1,8 @@
-# Behavioral Detection Engine
+# Advanced Detection Engine
 
 ## Overview
 
-The EDR Agent features a sophisticated Behavioral Detection Engine that monitors threats across multiple dimensions using platform-aware detection rules. This engine replaced the previous "injection detector" to provide comprehensive behavioral threat analysis.
+The EDR Agent features sophisticated detection engines that monitor threats across multiple dimensions using platform-aware detection rules and real-time network analysis. The system includes both behavioral threat detection and DNS anomaly monitoring for comprehensive security coverage.
 
 ## Features
 
@@ -32,6 +32,30 @@ The EDR Agent features a sophisticated Behavioral Detection Engine that monitors
 - **Progressive risk reduction** for repeated alerts to minimize false positives
 - **Cooldown multipliers** that gradually reduce alert severity for known patterns
 - **Per-process type limits** to prevent alert storms from legitimate system activity
+
+## 🌐 DNS Anomaly Detection Engine
+
+Comprehensive DNS threat detection with real-time analysis and behavioral monitoring.
+
+### 🔍 DNS Threat Detection Capabilities
+- **High-Frequency Query Detection**: Identifies rapid DNS query patterns (>5 queries/minute)
+- **Suspicious Domain Analysis**: Detects DGAs, free TLD abuse, base64 subdomains
+- **DNS Tunneling Detection**: Monitors TXT records, large responses, entropy analysis
+- **C2 Communication**: Identifies beaconing patterns and known malicious domains
+- **Data Exfiltration**: Volume-based detection of data transfer via DNS
+- **Process Attribution**: Links DNS queries to specific processes for context
+
+### 🚀 High-Throughput Optimization
+- **Non-blocking DNS monitoring** for busy network environments
+- **Process command line analysis** for fast domain extraction
+- **System DNS log integration** with systemd-resolved and dnsmasq
+- **RFC-compliant domain validation** with comprehensive pattern matching
+
+### 📊 DNS Monitoring Features
+- **Multiple DNS protocols**: Standard DNS, DoT, DoH, DoQ support
+- **DNS provider recognition**: Cloudflare, Google, Quad9, OpenDNS detection
+- **Custom port monitoring**: Non-standard DNS ports and configurations
+- **Real-time correlation**: DNS events linked to network connections
 
 ### 🛡️ System Process Context Recognition
 - **Cross-platform system process profiles**:

@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Your Name <simsjohn15@gmail.com>"]
 description = "Endpoint Detection and Response Agent"
 license = "MIT"
-repository = "https://github.com/RoninXV/edr-agent"
+repository = "https://github.com/Ronin15/rust_edr_agent"
 default-run = "edr-agent"
 
 [dependencies]
@@ -32,6 +32,8 @@ notify = "6.0"
 
 # Network
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+trust-dns-proto = "0.23"
+pnet = "0.34"
 
 # Error handling
 anyhow = "1.0"
@@ -100,6 +102,10 @@ path = "test_linux_detection.rs"
 [[bin]]
 name = "test_mac_detection"
 path = "test_mac_detection.rs"
+
+[[bin]]
+name = "test_dns_anomaly_detection"
+path = "test_dns_anomaly_detection.rs"
 
 [profile.release]
 lto = true

@@ -234,6 +234,10 @@ impl CollectorManager {
     pub fn get_event_sender(&self) -> mpsc::Sender<Event> {
         self.event_sender.clone()
     }
+    
+    pub fn get_config(&self) -> &CollectorsConfig {
+        &self.config
+    }
 }
 
 // Helper trait for collectors that need periodic execution

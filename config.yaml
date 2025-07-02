@@ -13,7 +13,6 @@ collectors:
     collect_environment: false
   file_monitor:
     enabled: true
-    # Note: Paths are automatically filtered based on OS - Windows ignores '/', Unix/Linux/Mac ignore 'C:\'
     watched_paths:
     - /
     - C:\
@@ -30,67 +29,83 @@ collectors:
     capture_packets: false
     max_packet_size: 1500
   registry_monitor:
-    enabled: true
+    enabled: false
     watched_keys:
     - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
     - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
-    - HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services
-    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows
-    - HKEY_LOCAL_MACHINE\SOFTWARE\Classes
-    - HKEY_LOCAL_MACHINE\SAM
 detectors:
   behavioral:
     enabled: true
     scan_interval_ms: 2000
-    alert_threshold: 0.4
+    alert_threshold: 0.6
     prevention_threshold: 0.8
     track_api_calls: true
     monitor_memory_operations: true
     monitor_thread_operations: true
     cross_platform_detection: true
-    # Linux noise reduction based on analysis of 96,436 events
-    system_process_contexts:
-      ProcessHangMon:
-        expected_paths: ["/usr/lib/firefox/", "/snap/firefox/"]
-        max_instances: 5
-        baseline_risk_reduction: 0.8  # 80% reduction for expected behavior
-        elevated_risk_multiplier: 2.0
-      pool-gnome-shel:
-        expected_paths: ["/usr/bin/", "/usr/lib/gnome-shell/"]
-        max_instances: 10
-        baseline_risk_reduction: 0.9  # 90% reduction for GNOME processes
-        elevated_risk_multiplier: 3.0
-    alert_frequency_limits:
-      ProcessHangMon:
-        max_alerts_per_hour: 3
-        cooldown_multiplier: 0.2
-      pool-gnome-shel:
-        max_alerts_per_hour: 2
-        cooldown_multiplier: 0.1
-      firefox:
-        max_alerts_per_hour: 8
-        cooldown_multiplier: 0.3
+    system_process_contexts: {}
+    alert_frequency_limits: {}
     path_context_rules: {}
     network_behavior_rules: {}
     time_based_risk_adjustment:
-      business_hours_multiplier: 1.0
-      after_hours_multiplier: 1.2
-      weekend_multiplier: 1.1
-      business_hours_start: 9
-      business_hours_end: 17
-  registry_monitor:
+      business_hours_multiplier: 0.0
+      after_hours_multiplier: 0.0
+      weekend_multiplier: 0.0
+      business_hours_start: 0
+      business_hours_end: 0
+  dns_anomaly:
     enabled: true
+    max_queries_per_minute: 100
+    max_queries_per_hour: 1000
+    max_unique_domains_per_hour: 500
+    entropy_threshold: 4.5
+    base64_detection_threshold: 0.7
+    data_exfiltration_threshold_mb_per_hour: 100
+    beaconing_detection_threshold: 0.8
+    txt_record_size_threshold: 512
+    monitor_dns_over_https: true
+    monitor_dns_over_tls: true
+    learning_period_hours: 24
+    suspicious_domain_patterns:
+    - .*\.onion$
+    - .*[0-9]{10,}.*
+    - .*[a-fA-F0-9]{32,}.*
+    - .*[A-Za-z0-9+/]{20,}=*.*
+    - .*\.tk$
+    - .*\.ml$
+    - .*\.ga$
+    - .*\.cf$
+    - .*dyndns\..*
+    - .*ddns\..*
+    - .*ngrok\..*
+    known_malicious_domains: []
+    known_c2_domains: []
+    dns_over_https_providers:
+    - 1.1.1.1
+    - 1.0.0.1
+    - 8.8.8.8
+    - 8.8.4.4
+    - 9.9.9.9
+    - 149.112.112.112
+    alert_frequency_limits:
+      suspicious_domain:
+        max_alerts_per_hour: 10
+        cooldown_multiplier: 0.3
+      dns_tunneling:
+        max_alerts_per_hour: 5
+        cooldown_multiplier: 0.5
+      high_volume_dns:
+        max_alerts_per_hour: 3
+        cooldown_multiplier: 0.7
+  registry_monitor:
+    enabled: false
     watched_keys:
-      - "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
-      - "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
-      - "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
-      - "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
-      - "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services"
-      - "HKEY_LOCAL_MACHINE\\SAM"
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
 storage:
   local_storage:
     enabled: true
-    data_directory: "./data"
+    data_directory: ./data
     compress_events: true
   retention_days: 30
   max_storage_size_gb: 10

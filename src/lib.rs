@@ -22,6 +22,7 @@ pub mod collectors {
 
 pub mod detectors {
     pub mod behavioral;
+    pub mod dns_anomaly;
     
     #[cfg(windows)]
     pub mod registry;

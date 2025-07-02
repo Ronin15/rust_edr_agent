@@ -29,7 +29,6 @@ pub struct BehavioralDetector {
 struct DetectorStats {
     events_processed: u64,
     alerts_generated: u64,
-    processes_tracked: u64,
     last_activity: Option<Instant>,
 }
 
@@ -730,54 +729,12 @@ impl BehavioralDetector {
         false
     }
 
-    fn is_suspicious_process_name(&self, _name: &str) -> bool {
-        #[cfg(target_os = "linux")]
-        {
-            // Linux-specific behavioral detection
-            // Focus on processes that shouldn't be running in certain contexts
-            // We'll check the parent process and execution path in analyze_process_event
-            false // Context checking happens in analyze_process_event
-        }
-        
-        #[cfg(windows)]
-        {
-            // Windows suspicious processes (exact matches only)
-            let suspicious_names = [
-                "powershell.exe", "cmd.exe", "rundll32.exe", "regsvr32.exe",
-                "mshta.exe", "wscript.exe", "cscript.exe"
-            ];
-            suspicious_names.iter().any(|&sus_name| name.to_lowercase() == sus_name)
-        }
-        
-        #[cfg(target_os = "macos")]
-        {
-            false // macOS behavioral detection
-        }
-    }
 
     fn is_suspicious_process_path(&self, path: &str) -> bool {
         self.detection_rules.suspicious_paths.iter()
             .any(|sus_path| path.contains(sus_path))
     }
     
-    // Context-aware risk scoring
-    fn calculate_context_aware_risk(&self, process_name: &str, process_path: &str, base_risk: f32) -> f32 {
-        if let Some(context) = self.detection_rules.system_process_contexts.get(process_name) {
-            // Check if process is running from expected location
-            let is_in_expected_location = context.expected_paths.iter()
-                .any(|expected_path| process_path.starts_with(expected_path));
-            
-            if is_in_expected_location {
-                // Reduce risk when in expected context
-                base_risk * context.baseline_risk_reduction
-            } else {
-                // Increase risk when in unexpected context
-                base_risk * context.elevated_risk_multiplier
-            }
-        } else {
-            base_risk
-        }
-    }
     
     // Check if we should suppress alert due to frequency limits
     fn should_suppress_alert(&self, tracker: &mut ProcessTracker, alert_key: &str) -> (bool, f32) {
@@ -1081,6 +1038,12 @@ impl Detector for BehavioralDetector {
     
     fn name(&self) -> &'static str {
         "behavioral_detector"
+    }
+}
+
+impl BehavioralDetector {
+    pub fn get_config(&self) -> &BehavioralDetectorConfig {
+        &self.config
     }
 }
 

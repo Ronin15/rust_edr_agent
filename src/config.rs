@@ -94,6 +94,7 @@ impl Default for RegistryMonitorConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DetectorsConfig {
     pub behavioral: BehavioralDetectorConfig,
+    pub dns_anomaly: DnsAnomalyDetectorConfig,
     pub registry_monitor: RegistryMonitorConfig,
     // pub malware_detector: MalwareDetectorConfig,
     // pub anomaly_detector: AnomalyDetectorConfig,
@@ -119,6 +120,90 @@ pub struct BehavioralDetectorConfig {
     pub network_behavior_rules: HashMap<String, NetworkBehaviorRule>,
     #[serde(default)]
     pub time_based_risk_adjustment: TimeBasedRiskAdjustment,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DnsAnomalyDetectorConfig {
+    pub enabled: bool,
+    pub max_queries_per_minute: u64,
+    pub max_queries_per_hour: u64,
+    pub max_unique_domains_per_hour: u64,
+    pub entropy_threshold: f64,
+    pub base64_detection_threshold: f64,
+    pub data_exfiltration_threshold_mb_per_hour: u64,
+    pub beaconing_detection_threshold: f64,
+    pub txt_record_size_threshold: usize,
+    pub monitor_dns_over_https: bool,
+    pub monitor_dns_over_tls: bool,
+    pub learning_period_hours: u64,
+    #[serde(default)]
+    pub suspicious_domain_patterns: Vec<String>,
+    #[serde(default)]
+    pub known_malicious_domains: Vec<String>,
+    #[serde(default)]
+    pub known_c2_domains: Vec<String>,
+    #[serde(default)]
+    pub dns_over_https_providers: Vec<String>,
+    #[serde(default)]
+    pub alert_frequency_limits: HashMap<String, FrequencyLimit>,
+}
+
+impl Default for DnsAnomalyDetectorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_queries_per_minute: 100,
+            max_queries_per_hour: 1000,
+            max_unique_domains_per_hour: 500,
+            entropy_threshold: 4.5,
+            base64_detection_threshold: 0.7,
+            data_exfiltration_threshold_mb_per_hour: 100,
+            beaconing_detection_threshold: 0.8,
+            txt_record_size_threshold: 512,
+            monitor_dns_over_https: true,
+            monitor_dns_over_tls: true,
+            learning_period_hours: 24,
+            suspicious_domain_patterns: vec![
+                r".*\.onion$".to_string(),
+                r".*[0-9]{10,}.*".to_string(),
+                r".*[a-fA-F0-9]{32,}.*".to_string(),
+                r".*[A-Za-z0-9+/]{20,}=*.*".to_string(),
+                r".*\.tk$".to_string(),
+                r".*\.ml$".to_string(),
+                r".*\.ga$".to_string(),
+                r".*\.cf$".to_string(),
+                r".*dyndns\..*".to_string(),
+                r".*ddns\..*".to_string(),
+                r".*ngrok\..*".to_string(),
+            ],
+            known_malicious_domains: vec![],
+            known_c2_domains: vec![],
+            dns_over_https_providers: vec![
+                "1.1.1.1".to_string(),
+                "1.0.0.1".to_string(),
+                "8.8.8.8".to_string(),
+                "8.8.4.4".to_string(),
+                "9.9.9.9".to_string(),
+                "149.112.112.112".to_string(),
+            ],
+            alert_frequency_limits: {
+                let mut limits = HashMap::new();
+                limits.insert("dns_tunneling".to_string(), FrequencyLimit {
+                    max_alerts_per_hour: 5,
+                    cooldown_multiplier: 0.5,
+                });
+                limits.insert("high_volume_dns".to_string(), FrequencyLimit {
+                    max_alerts_per_hour: 3,
+                    cooldown_multiplier: 0.7,
+                });
+                limits.insert("suspicious_domain".to_string(), FrequencyLimit {
+                    max_alerts_per_hour: 10,
+                    cooldown_multiplier: 0.3,
+                });
+                limits
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -447,6 +532,7 @@ impl Default for Config {
                     network_behavior_rules: HashMap::new(),
                     time_based_risk_adjustment: TimeBasedRiskAdjustment::default(),
                 },
+                dns_anomaly: DnsAnomalyDetectorConfig::default(),
                 registry_monitor: RegistryMonitorConfig {
                     enabled: cfg!(windows),
                     watched_keys: vec![
