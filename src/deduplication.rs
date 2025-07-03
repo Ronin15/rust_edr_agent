@@ -780,7 +780,10 @@ impl SecurityAwareDeduplicator {
                 let path = &file_data.path;
                 
                 // Only exclude self-generated event files to avoid monitoring loops
-                if path.contains("/projects/rust_projects/edr_agent/data/events_") {
+                let unix_path = path.contains("/projects/rust_projects/edr_agent/data/events_");
+                let windows_path = path.contains("\\projects\\rust_projects\\edr_agent\\data\\events_");
+                
+                if unix_path || windows_path {
                     debug!("Excluding self-generated event file: {}", path);
                     return true;
                 }
