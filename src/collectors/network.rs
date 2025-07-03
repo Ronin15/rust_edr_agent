@@ -1,5 +1,4 @@
-use anyhow::{Result, anyhow};
-use std::fs;
+use anyhow::Result;
 use tracing::{info, error, debug};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
@@ -7,7 +6,7 @@ use tokio::process::Command;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-// Cross-platform imports
+//Cross-platform imports
 #[cfg(target_os = "linux")]
 use procfs::net::{TcpState, tcp, udp};
 
