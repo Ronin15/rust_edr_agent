@@ -72,6 +72,98 @@ pub struct NetworkCollector {
 }
 
 impl NetworkCollector {
+    // Non-blocking version of DNS event creation for high-throughput scenarios
+    fn create_enhanced_dns_event_nonblocking(&self, connection: &NetworkConnection, _key: &ConnectionKey) -> Option<Event> {
+        // For high-throughput networks, avoid expensive async operations
+        // Only extract domain from process command line (fast, local operation)
+        
+        let domain = if let Some(_pid) = connection.pid {
+            // Try quick process command line extraction (Linux only for performance)
+            #[cfg(target_os = "linux")]
+            {
+                let cmdline_path = format!("/proc/{}/cmdline", _pid);
+                if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
+                    // Extract domain patterns from command line
+                    let mut found_domain = None;
+                    for word in cmdline.split_whitespace() {
+                        if word.contains('.') && 
+                           word.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') &&
+                           word.len() > 3 &&
+                           word.matches('.').count() >= 1 {
+                            // Basic domain validation
+                            let parts: Vec<&str> = word.split('.').collect();
+                            if parts.len() >= 2 && parts.last().unwrap().len() >= 2 {
+                                found_domain = Some(word.to_string());
+                                break;
+                            }
+                        }
+                    }
+                    found_domain
+                } else {
+                    None
+                }
+            }
+            
+            #[cfg(not(target_os = "linux"))]
+            {
+                None
+            }
+        } else {
+            None
+        }.unwrap_or_else(|| "unknown-domain".to_string());
+        
+        // Quick DNS query type inference
+        let query_type = match connection.remote_port {
+            Some(53) => "A",
+            Some(853) => "A", 
+            Some(443) => "A",
+            _ => "A",
+        };
+        
+        let dns_query = format!("{}:{}", query_type, domain);
+        
+        let data = EventData::Network(NetworkEventData {
+            protocol: format!("dns-{}", connection.protocol),
+            source_ip: connection.local_ip.clone(),
+            source_port: connection.local_port,
+            destination_ip: connection.remote_ip.clone(),
+            destination_port: connection.remote_port,
+            direction: connection.direction.clone(),
+            bytes_sent: Some(64), // Typical DNS query size
+            bytes_received: Some(128), // Typical DNS response size
+            connection_state: connection.state.clone(),
+            dns_query: Some(dns_query),
+            dns_response: None, // Skip expensive system queries in high-throughput mode
+            process_id: connection.pid,
+            process_name: connection.process_name.clone(),
+        });
+        
+        let mut event = Event::new(
+            EventType::NetworkDnsQuery,
+            "high_throughput_dns_monitor".to_string(),
+            self.hostname.to_string(),
+            self.agent_id.to_string(),
+            data,
+        );
+        
+        // Add minimal metadata for performance
+        event.add_metadata("dns_provider".to_string(), 
+            if let Some(ref ip) = connection.remote_ip {
+                if self.is_known_dns_provider(ip) {
+                    "known_provider".to_string()
+                } else {
+                    "custom_dns".to_string()
+                }
+            } else {
+                "unknown".to_string()
+            }
+        );
+        
+        event.add_metadata("performance_mode".to_string(), "high_throughput".to_string());
+        
+        Some(event)
+    }
+
     pub async fn new(
         config: NetworkMonitorConfig,
         event_sender: mpsc::Sender<Event>,
@@ -844,58 +936,51 @@ impl NetworkCollector {
     }
     
     // Get socket byte counts - platform-specific implementations
-async fn get_socket_byte_counts(&self, pid: Option<u32>, #[cfg(target_os = "macos")] connection_key: &ConnectionKey) -> (u64, u64) {
-        #[cfg(target_os = "linux")]
-        {
-            // For Linux, get per-process network statistics from /proc/{pid}/net/dev
-            if let Some(pid) = pid {
-                return self.get_process_network_bytes(pid).await;
-            }
-            
-            // Fallback to system-wide interface statistics
+    #[cfg(target_os = "macos")]
+    async fn get_socket_byte_counts(&self, pid: Option<u32>, connection_key: &ConnectionKey) -> (u64, u64) {
+        self.get_macos_connection_bytes(pid, connection_key).await
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn get_socket_byte_counts(&self, pid: Option<u32>) -> (u64, u64) {
+        if let Some(pid) = pid {
+            self.get_process_network_bytes(pid).await
+        } else {
             self.get_system_network_bytes().await
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    async fn get_socket_byte_counts(&self, pid: Option<u32>) -> (u64, u64) {
+        let mut total_rx = 0u64;
+        let mut total_tx = 0u64;
         
-        #[cfg(target_os = "macos")]
+        if let Ok(output) = Command::new("netstat")
+            .args(["-e"])
+            .output()
         {
-            // For macOS, use netstat to get connection-specific byte counts
-            self.get_macos_connection_bytes(pid, connection_key).await
-        }
-        
-        #[cfg(target_os = "windows")]
-        {
-            // For Windows, use sysinfo to get network interface statistics
-            // Windows fallback using netstat
-            let mut total_rx = 0u64;
-            let mut total_tx = 0u64;
-            
-            if let Ok(output) = Command::new("netstat")
-                .args(["-e"])
-                .output()
-            {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                for line in output_str.lines().skip(4) { // Skip headers
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 4 {
-                        if let (Ok(rx), Ok(tx)) = (
-                            parts[1].replace(",", "").parse::<u64>(),
-                            parts[2].replace(",", "").parse::<u64>()
-                        ) {
-                            total_rx += rx;
-                            total_tx += tx;
-                        }
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            for line in output_str.lines().skip(4) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    if let (Ok(rx), Ok(tx)) = (
+                        parts[1].replace(",", "").parse::<u64>(),
+                        parts[2].replace(",", "").parse::<u64>()
+                    ) {
+                        total_rx += rx;
+                        total_tx += tx;
                     }
                 }
             }
-            
-            (total_tx, total_rx)
         }
         
-        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-        {
-            // For other platforms, return zeros
-            (0, 0)
-        }
+        (total_tx, total_rx)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    async fn get_socket_byte_counts(&self, _pid: Option<u32>) -> (u64, u64) {
+        (0, 0)
+    }
     }
     
     // Linux-specific: Get network byte counts for a specific process
@@ -1054,98 +1139,6 @@ async fn get_socket_byte_counts(&self, pid: Option<u32>, #[cfg(target_os = "maco
     
     
     
-    // Non-blocking version of DNS event creation for high-throughput scenarios
-    fn create_enhanced_dns_event_nonblocking(&self, connection: &NetworkConnection, _key: &ConnectionKey) -> Option<Event> {
-        // For high-throughput networks, avoid expensive async operations
-        // Only extract domain from process command line (fast, local operation)
-        
-        let domain = if let Some(_pid) = connection.pid {
-            // Try quick process command line extraction (Linux only for performance)
-            #[cfg(target_os = "linux")]
-            {
-                let cmdline_path = format!("/proc/{}/cmdline", _pid);
-                if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
-                    // Extract domain patterns from command line
-                    let mut found_domain = None;
-                    for word in cmdline.split_whitespace() {
-                        if word.contains('.') && 
-                           word.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') &&
-                           word.len() > 3 &&
-                           word.matches('.').count() >= 1 {
-                            // Basic domain validation
-                            let parts: Vec<&str> = word.split('.').collect();
-                            if parts.len() >= 2 && parts.last().unwrap().len() >= 2 {
-                                found_domain = Some(word.to_string());
-                                break;
-                            }
-                        }
-                    }
-                    found_domain
-                } else {
-                    None
-                }
-            }
-            
-            #[cfg(not(target_os = "linux"))]
-            {
-                None
-            }
-        } else {
-            None
-        }.unwrap_or_else(|| "unknown-domain".to_string());
-        
-        // Quick DNS query type inference
-        let query_type = match connection.remote_port {
-            Some(53) => "A",
-            Some(853) => "A", 
-            Some(443) => "A",
-            _ => "A",
-        };
-        
-        let dns_query = format!("{}:{}", query_type, domain);
-        
-        let data = EventData::Network(NetworkEventData {
-            protocol: format!("dns-{}", connection.protocol),
-            source_ip: connection.local_ip.clone(),
-            source_port: connection.local_port,
-            destination_ip: connection.remote_ip.clone(),
-            destination_port: connection.remote_port,
-            direction: connection.direction.clone(),
-            bytes_sent: Some(64), // Typical DNS query size
-            bytes_received: Some(128), // Typical DNS response size
-            connection_state: connection.state.clone(),
-            dns_query: Some(dns_query),
-            dns_response: None, // Skip expensive system queries in high-throughput mode
-            process_id: connection.pid,
-            process_name: connection.process_name.clone(),
-        });
-        
-        let mut event = Event::new(
-            EventType::NetworkDnsQuery,
-            "high_throughput_dns_monitor".to_string(),
-            self.hostname.to_string(),
-            self.agent_id.to_string(),
-            data,
-        );
-        
-        // Add minimal metadata for performance
-        event.add_metadata("dns_provider".to_string(), 
-            if let Some(ref ip) = connection.remote_ip {
-                if self.is_known_dns_provider(ip) {
-                    "known_provider".to_string()
-                } else {
-                    "custom_dns".to_string()
-                }
-            } else {
-                "unknown".to_string()
-            }
-        );
-        
-        event.add_metadata("performance_mode".to_string(), "high_throughput".to_string());
-        
-        Some(event)
-    }
-}
 
 #[async_trait::async_trait]
 impl Collector for NetworkCollector {
@@ -1260,7 +1253,12 @@ impl PeriodicCollector for NetworkCollector {
                             }
                         } else {
                             // New connection - always report (security critical)
+                            #[cfg(target_os = "macos")]
                             let (tx_bytes, rx_bytes) = self.get_socket_byte_counts(connection.pid, &key).await;
+                            
+                            #[cfg(not(target_os = "macos"))]
+                            let (tx_bytes, rx_bytes) = self.get_socket_byte_counts(connection.pid).await;
+                            
                             states.insert(key.clone(), ConnectionState {
                                 first_seen: now,
                                 last_seen: now,
