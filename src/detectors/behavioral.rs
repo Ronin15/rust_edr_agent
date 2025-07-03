@@ -409,13 +409,13 @@ async fn analyze_process_event(
                 
                 if !should_suppress {
                     let final_risk = adjusted_risk * severity_multiplier;
-                    let severity = if final_risk >= 0.7 {
-                        AlertSeverity::High
-                    } else if final_risk >= 0.4 {
-                        AlertSeverity::Medium
-                    } else {
-                        AlertSeverity::Low
-                    };
+            let severity = if final_risk >= 0.85 {
+                AlertSeverity::High
+            } else if final_risk >= 0.65 {
+                AlertSeverity::Medium
+            } else {
+                AlertSeverity::Low
+            };
                     
                     alerts.push(self.create_alert(
                         InjectionEventType::SuspiciousProcess,
@@ -468,8 +468,8 @@ async fn analyze_process_event(
             );
             
             if !should_suppress {
-                let base_risk = 0.4;
-                let final_risk = base_risk * severity_multiplier;
+            let base_risk = 0.3;
+            let final_risk = base_risk * severity_multiplier;
                 
                 let severity = if final_risk >= 0.6 {
                     AlertSeverity::High
