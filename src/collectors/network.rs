@@ -697,7 +697,8 @@ impl NetworkCollector {
         // Get network connections using netstat
         if let Ok(output) = Command::new("netstat")
             .args(["-ano"])
-            .output() 
+            .output()
+            .await
         {
             let output_str = String::from_utf8_lossy(&output.stdout);
             for line in output_str.lines().skip(4) { // Skip header lines
@@ -1087,6 +1088,7 @@ impl NetworkCollector {
         if let Ok(output) = Command::new("netstat")
             .args(["-e"])
             .output()
+            .await
         {
             let output_str = String::from_utf8_lossy(&output.stdout);
             for line in output_str.lines().skip(4) {
