@@ -287,6 +287,35 @@ impl BehavioralDetector {
             max_alerts_per_hour: 3, // Limit Biome temp file alerts
             cooldown_multiplier: 0.4,
         });
+
+        // Mail operation frequency limits
+        alert_frequency_limits.insert("mail_tmp".to_string(), FrequencyLimit {
+            max_alerts_per_hour: 15, // Allow more temp file operations for Mail
+            cooldown_multiplier: 0.3, // Reduce subsequent alert severity by 70%
+        });
+
+        alert_frequency_limits.insert("mail_group".to_string(), FrequencyLimit {
+            max_alerts_per_hour: 10, // Group container operations
+            cooldown_multiplier: 0.3,
+        });
+
+        // Messages app limits
+        alert_frequency_limits.insert("messages_tmp".to_string(), FrequencyLimit {
+            max_alerts_per_hour: 20, // Messages can create many temp files for attachments
+            cooldown_multiplier: 0.3,
+        });
+
+        // News widget limits
+        alert_frequency_limits.insert("news_widget_tmp".to_string(), FrequencyLimit {
+            max_alerts_per_hour: 10, // News widget temp files
+            cooldown_multiplier: 0.3,
+        });
+
+        // PersonalizationPortrait limits
+        alert_frequency_limits.insert("personalization_portrait".to_string(), FrequencyLimit {
+            max_alerts_per_hour: 30, // High frequency for social ranking updates
+            cooldown_multiplier: 0.3,
+        });
         
         DetectionRules {
             system_process_contexts,
@@ -310,40 +339,38 @@ async fn analyze_process_event(
     }
 
     // Update or create process state
-    let process_state = tracker.processes.entry(pid).or_insert_with(|| {
-        ProcessState {
-                pid,
-                name: process_data.name.clone(),
-                path: process_data.path.clone(),
-                parent_pid: process_data.ppid.unwrap_or(0),
-                creation_time: Instant::now(),
-                handles_opened: 0,
-                memory_operations: 0,
-                thread_operations: 0,
-                dll_operations: 0,
-                file_operations: 0,
-                network_operations: 0,
-                suspicious_api_calls: Vec::new(),
-                risk_score: 0.0,
-                last_update: Instant::now(),
-            }
-        });
-        process_state.last_update = Instant::now();
-        
-        // Move mutable usage of tracker here
-        let process_name = process_state.name.clone();
-        let process_path = process_state.path.clone();
-        let parent_pid = process_state.parent_pid;
-        
-        // Check for suspicious process characteristics using context-aware scoring
-        let mut alerts = Vec::new();
-        
-        // Implement parent process hierarchy analysis for injection detection
-        if let Some(parent_alert) = self.analyze_parent_process_hierarchy(
-            tracker, pid, parent_pid, &process_name, &process_path
-        ).await {
-            alerts.push(parent_alert);
-        }
+    let process_state = tracker.processes.entry(pid).or_insert_with(|| ProcessState {
+        pid,
+        name: process_data.name.clone(),
+        path: process_data.path.clone(),
+        parent_pid: process_data.ppid.unwrap_or(0),
+        creation_time: Instant::now(),
+        handles_opened: 0,
+        memory_operations: 0,
+        thread_operations: 0,
+        dll_operations: 0,
+        file_operations: 0,
+        network_operations: 0,
+        suspicious_api_calls: Vec::new(),
+        risk_score: 0.0,
+        last_update: Instant::now(),
+    });
+    process_state.last_update = Instant::now();
+    
+    // Move mutable usage of tracker here
+    let process_name = process_state.name.clone();
+    let process_path = process_state.path.clone();
+    let parent_pid = process_state.parent_pid;
+    
+    // Check for suspicious process characteristics using context-aware scoring
+    let mut alerts = Vec::new();
+    
+    // Implement parent process hierarchy analysis for injection detection
+    if let Some(parent_alert) = self.analyze_parent_process_hierarchy(
+        tracker, pid, parent_pid, &process_name, &process_path
+    ).await {
+        alerts.push(parent_alert);
+    }
 
         // Linux-specific behavioral detection
         #[cfg(target_os = "linux")]
@@ -447,18 +474,26 @@ async fn analyze_process_event(
             }
         }
         
-        // For now, return the first alert (if any)
-        Ok(alerts.into_iter().next())
-    }
+    // For now, return the first alert (if any)
+    Ok(alerts.into_iter().next())
+}
 
-    async fn analyze_file_event(
+async fn analyze_file_event(
         &self,
         tracker: &mut ProcessTracker,
         _event: &Event,
         file_data: &FileEventData,
     ) -> Result<Option<DetectorAlert>> {
+        // Get operation type context first - assuming we use modification time as a proxy for write operations
+        let is_write = file_data.modified_time.is_some();
+
         // Use enhanced file path analysis with context
-        let (is_suspicious, alert_key) = self.analyze_file_path_context(&file_data.path);
+        let (mut is_suspicious, alert_key) = self.analyze_file_path_context(&file_data.path);
+
+        // Only warn on write operations for certain paths
+        if alert_key == "mail_tmp" || alert_key == "news_widget_tmp" || alert_key == "personalization_portrait" {
+            is_suspicious = is_suspicious && is_write;
+        }
         
         if is_suspicious {
             // Check frequency limits for this type of file alert
@@ -718,21 +753,113 @@ async fn analyze_process_event(
     
     // Enhanced file path analysis
     fn analyze_file_path_context(&self, path: &str) -> (bool, String) {
-        // Check for specific patterns that might be false positives
-        if path.contains("/Library/Biome/tmp/") {
-            return (true, "biome_tmp".to_string());
+        #[cfg(target_os = "macos")] {
+            // Early check for legitimate macOS locations
+            if path.starts_with("/System/Library/") || 
+               path.starts_with("/Library/Apple/") || 
+               path.starts_with("/Library/Application Support/") {
+                return (false, "system_files".to_string());
+            }
+
+            // macOS app container paths
+            if path.contains("/Library/Containers/") {
+                return self.analyze_macos_container_path(path);
+            }
+
+            // Group container paths
+            if path.contains("/Library/Group Containers/group.com.apple.") {
+                return (false, "group_container".to_string());
+            }
+
+            // System temporary directories
+            if path.contains("/private/var/folders/") || 
+               path.starts_with("/private/tmp/") || 
+               path.starts_with("/tmp/") {
+                return self.analyze_macos_temp_path(path);
+            }
+
+            // Biome and PersonalizationPortrait paths
+            if path.contains("/Library/") {
+                return self.analyze_macos_library_path(path);
+            }
         }
-        
-        if path.contains("/Library/PersonalizationPortrait/") {
-            return (true, "personalization_tmp".to_string());
-        }
-        
-        if path.starts_with("/private/tmp/zsh") {
-            return (true, "zsh_tmp".to_string());
-        }
-        
-        // Default suspicious file check
+
+        // Default behavior for non-macOS or unhandled paths
         (self.is_suspicious_file_path(path), "general_suspicious_file".to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn analyze_macos_container_path(&self, path: &str) -> (bool, String) {
+        // Mail paths
+        if path.contains("com.apple.mail") {
+            if path.contains("/Data/tmp/") && (
+                path.contains("/TemporaryItems/NSIRD_Mail_") || 
+                path.contains("/tmp/etilqs_") || 
+                path.contains("/tmp/TemporaryItems/")
+            ) {
+                return (false, "mail_tmp".to_string());
+            }
+            if path.contains("/Library/Preferences/") {
+                return (false, "mail_group".to_string());
+            }
+            return (false, "mail_other".to_string());
+        }
+
+        // Messages app
+        if path.contains("com.apple.MobileSMS/Data/tmp/.LINKS/") {
+            return (false, "messages_tmp".to_string());
+        }
+
+        // News widget
+        if path.contains("com.apple.news.widget/Data/tmp/TemporaryItems/NSIRD_NewsToday2_") {
+            return (false, "news_widget_tmp".to_string());
+        }
+
+        // Default container paths are generally safe
+        (false, "app_container".to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn analyze_macos_temp_path(&self, path: &str) -> (bool, String) {
+        // Handle known temp patterns
+        if path.contains("/TemporaryItems/") || 
+           path.contains("/T/") || 
+           path.contains("/Cleanup At Startup/") {
+            // Mail config files
+            if path.contains("group.com.apple.mail.plist") {
+                return (false, "mail_group".to_string());
+            }
+            return (false, "system_tmp".to_string());
+        }
+
+        // ZSH temp files
+        if path.contains("/zsh") && (path.contains(".zsh") || path.contains("zsh-")) {
+            return (false, "zsh_tmp".to_string());
+        }
+
+        // Apple and system temp files
+        if path.contains("/com.apple.") || 
+           path.contains("/CoreSimulator/") || 
+           path.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '/').count() >= 28 {
+            return (false, "system_tmp".to_string());
+        }
+
+        // Any other temp files are potentially suspicious
+        (true, "suspicious_tmp".to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
+        // Add logic to handle analysis or return default for unhandled cases
+        if path.contains("/Library/PersonalizationPortrait/") {
+            if path.contains("/streams/rankedSocialHighlights/") ||
+               path.contains("/Contacts/name_records/") &&
+               path.contains("/tmp/") {
+                return (false, "personalization_portrait".to_string());
+            }
+        }
+        // Default behavior
+        (false, "general_library".to_string())
     }
 
     fn create_alert(
@@ -1015,37 +1142,115 @@ async fn analyze_process_event(
         system_utilities.iter().any(|&util| name_lower == util || name_lower.ends_with(&format!("/{}", util)))
     }
     
+    #[cfg(target_os = "macos")]
+    fn is_legitimate_macos_process(&self, process_name: &str, process_path: &str, parent_name: &str, parent_path: &str) -> bool {
+        // Early return for mdworker_shared - macOS metadata worker process
+        if process_name == "mdworker_shared" {
+            const MDWORKER_PATH: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared";
+            // mdworker_shared is legitimate if it's running from the correct path and parent is launchd
+            return process_path == MDWORKER_PATH && parent_name == "launchd" && parent_path == "/sbin/launchd";
+        }
+        // Special case for mdworker_shared - part of macOS Spotlight indexing
+        let legitimate_processes = [
+            // Launchd processes
+            ("launchd", "/sbin/launchd", "", ""), // Main launchd (no parent)
+            ("launchd", "/sbin/launchd", "launchd", "/sbin/launchd"), // Self-parent
+            ("launchd.system", "/usr/libexec/launchd.system", "launchd", "/sbin/launchd"),
+            ("launchd_helper", "/usr/libexec/launchd_helper", "launchd", "/sbin/launchd"),
+            ("launchd.peruser", "/usr/libexec/launchd.peruser", "launchd", "/sbin/launchd"),
+            // Other system processes
+            ("Spotlight", "/System/Library/CoreServices/Spotlight.app/Contents/MacOS/Spotlight", "launchd", "/sbin/launchd"),
+            ("securityd", "/usr/sbin/securityd", "launchd", "/sbin/launchd"),
+            ("WindowServer", "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer", "launchd", "/sbin/launchd"),
+            ("cfprefsd", "/usr/sbin/cfprefsd", "launchd", "/sbin/launchd"),
+            ("trustd", "/usr/libexec/trustd", "launchd", "/sbin/launchd"),
+            ("opendirectoryd", "/usr/libexec/opendirectoryd", "launchd", "/sbin/launchd"),
+        ];
+
+        // Find matching process configuration
+        if let Some(&(name, expected_path, expected_parent, expected_parent_path)) = 
+            legitimate_processes.iter().find(|&&(name, _, _, _)| name == process_name) {
+            // Must match exact path
+            if process_path != expected_path {
+                return false;
+            }
+
+            // Handle special case for main launchd (PID 1)
+            if name == "launchd" && expected_path == "/sbin/launchd" && expected_parent.is_empty() {
+                return parent_name.is_empty() || (parent_name == "launchd" && parent_path == "/sbin/launchd");
+            }
+
+            // For all other processes, must match expected parent
+            return parent_name == expected_parent && parent_path == expected_parent_path;
+        }
+
+        // Not a critical system process we strictly validate
+        true
+    }
+
     fn is_potential_process_hollowing(&self, process_name: &str, process_path: &str, parent_name: &str, parent_path: &str) -> bool {
-        // Check for mismatched process names and paths
-        // This is a simplified heuristic - real process hollowing detection would be more complex
-        
-        // 1. Process name doesn't match the executable name in the path
+        // Special case for mdworker_shared - we handle it in is_legitimate_macos_process
+        #[cfg(target_os = "macos")]
+        if process_name == "mdworker_shared" {
+            return !self.is_legitimate_macos_process(process_name, process_path, parent_name, parent_path);
+        }
+        // Check macOS specific processes first - macOS process validation handles mdworker_shared
+        // Check macOS specific processes first
+        #[cfg(target_os = "macos")]
+        if !self.is_legitimate_macos_process(process_name, process_path, parent_name, parent_path) {
+            return true;
+        }
+
+        // Generic checks for all platforms
+        let mut is_hollow = false;
+
+        // Process name/path mismatch detection
         if let Some(path_filename) = process_path.split('/').last() {
             let path_basename = path_filename.split('.').next().unwrap_or(path_filename);
             if process_name != path_basename && !process_name.starts_with(path_basename) {
-                return true;
+                // Known legitimate cases where name doesn't match path
+                let legitimate_renames = [
+                    ("chrome", "google-chrome"),
+                    ("firefox", "mozilla-firefox"),
+                ];
+                
+                if !legitimate_renames.iter().any(|(orig, renamed)| 
+                    (process_name.contains(orig) && path_basename.contains(renamed)) ||
+                    (process_name.contains(renamed) && path_basename.contains(orig))) {
+                    is_hollow = true;
+                }
             }
         }
-        
-        // 2. Child process in same directory as parent but different expected behavior
-        if process_path.starts_with(&parent_path[..parent_path.rfind('/').unwrap_or(0)]) {
-            // Same directory, check if this is expected behavior
-            if parent_name == "explorer.exe" && process_name != "explorer.exe" {
-                return true; // Suspicious: non-explorer process in explorer directory
-            }
-        }
-        
-        // 3. System processes in user directories
+
+        // System process location checks
         if self.is_system_process_name(process_name) {
-            let user_directories = ["/home/", "/Users/", "C:\\Users\\", "/tmp/", "/var/tmp/"];
-            if user_directories.iter().any(|&dir| process_path.contains(dir)) {
-                return true;
+            let user_writable_dirs = [
+                "/home/", "/Users/", "/tmp/", "/var/tmp/",
+                "/dev/shm/", "AppData", "Local", "Temp", "Downloads",
+            ];
+            
+            if user_writable_dirs.iter().any(|dir| process_path.to_lowercase().contains(dir)) {
+                is_hollow = true;
+            }
+
+            // Path depth check for system processes
+            let process_depth = process_path.matches('/').count();
+            let parent_depth = parent_path.matches('/').count();
+            if process_depth > parent_depth + 2 {
+                is_hollow = true;
             }
         }
-        
-        false
+
+        // Check for suspicious characters in paths
+        if self.is_system_process_name(process_name) {
+            let suspicious_chars = [" ", "  ", ".", "..", "...", " 7f8a0", " 7f0a00"];
+            if suspicious_chars.iter().any(|c| process_path.contains(c)) {
+                is_hollow = true;
+            }
+        }
+
+        is_hollow
     }
-    
     fn calculate_process_chain_depth(&self, tracker: &ProcessTracker, pid: u32, current_depth: u32) -> u32 {
         if current_depth > 20 {
             return current_depth; // Prevent infinite recursion
