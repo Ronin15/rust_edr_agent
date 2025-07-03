@@ -844,7 +844,7 @@ impl NetworkCollector {
     }
     
     // Get socket byte counts - platform-specific implementations
-async fn get_socket_byte_counts(&self, pid: Option<u32>, _connection_key: &ConnectionKey) -> (u64, u64) {
+async fn get_socket_byte_counts(&self, pid: Option<u32>, #[cfg(target_os = "macos")] connection_key: &ConnectionKey) -> (u64, u64) {
         #[cfg(target_os = "linux")]
         {
             // For Linux, get per-process network statistics from /proc/{pid}/net/dev
