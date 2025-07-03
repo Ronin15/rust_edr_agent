@@ -10,6 +10,9 @@ use std::time::{Duration, Instant};
 #[cfg(target_os = "linux")]
 use procfs::net::{TcpState, tcp, udp};
 
+#[cfg(target_os = "linux")]
+use std::fs;
+
 #[cfg(target_os = "macos")]
 use std::process::Command as StdCommand;
 
