@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use tracing::{info, error, debug};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
@@ -12,14 +12,6 @@ use procfs::net::{TcpState, tcp, udp};
 
 #[cfg(target_os = "macos")]
 use std::process::Command as StdCommand;
-
-#[cfg(target_os = "windows")]
-use windows::{
-    Win32::NetworkManagement::IpHelper::*,
-    Win32::Networking::WinSock::*,
-    Win32::Foundation::*,
-    core::*,
-};
 
 use crate::config::NetworkMonitorConfig;
 use crate::events::{Event, EventType, EventData, NetworkEventData, NetworkDirection};
@@ -604,30 +596,81 @@ impl NetworkCollector {
         network_indicators.iter().any(|&indicator| process_name.contains(indicator)) || high_activity
     }
     
-    // Windows implementation using safe alternatives
+// Windows implementation using safe alternatives
     #[cfg(target_os = "windows")]
     async fn get_windows_connections(&self) -> Result<Vec<NetworkConnection>> {
         let mut connections = Vec::new();
         
-        // Use sysinfo to get network information safely
-        let mut sys = sysinfo::System::new_all();
-        sys.refresh_networks_list();
-        sys.refresh_all();
-        sys.refresh_processes();
-        
-        // For Windows, we'll primarily rely on netstat fallback
-        // since safe pure Rust Windows network connection enumeration 
-        // requires complex WinAPI calls that would need unsafe code
-        debug!("Windows: Using safe fallback methods for network monitoring");
-        
-        // Try to get basic network interface information from sysinfo
-        for (interface_name, network) in sys.networks() {
-            debug!("Network interface: {} - received: {} bytes, transmitted: {} bytes", 
-                   interface_name, network.received(), network.transmitted());
+        // Get network connections using netstat
+        if let Ok(output) = Command::new("netstat")
+            .args(["-ano"])
+            .output() 
+        {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            for line in output_str.lines().skip(4) { // Skip header lines
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 5 {
+                    let protocol = parts[0].to_lowercase();
+                    if protocol != "tcp" && protocol != "udp" {
+                        continue;
+                    }
+
+                    // Parse local address
+                    let local_addr = parts[1];
+                    let (local_ip, local_port) = self.parse_address(local_addr)
+                        .ok_or_else(|| anyhow!("Failed to parse local address: {}", local_addr))?;
+
+                    // Parse remote address
+                    let remote_addr = parts[2];
+                    let (remote_ip, remote_port) = self.parse_address(remote_addr)
+                        .ok_or_else(|| anyhow!("Failed to parse remote address: {}", remote_addr))?;
+
+                    // Get state and PID
+                    let state = if parts.len() > 3 {
+                        Some(parts[3].to_string())
+                    } else {
+                        None
+                    };
+
+                    let pid = if parts.len() > 4 {
+                        parts[4].parse().ok()
+                    } else {
+                        None
+                    };
+
+                    // Determine direction
+                    let direction = if state.as_deref() == Some("LISTENING") {
+                        NetworkDirection::Inbound
+                    } else {
+                        NetworkDirection::Outbound
+                    };
+
+                    connections.push(NetworkConnection {
+                        protocol,
+                        local_ip: Some(local_ip),
+                        local_port: Some(local_port.unwrap_or(0)),
+                        remote_ip: Some(remote_ip),
+                        remote_port: Some(remote_port.unwrap_or(0)),
+                        direction,
+                        state,
+                        pid,
+                        process_name: None, // Will be populated later if needed
+                    });
+                }
+            }
         }
-        
-        // The actual connection enumeration will fall back to netstat
-        // which is handled in the main get_network_connections method
+
+        // If we have connections with PIDs, try to get their process names
+        let mut sys = sysinfo::System::new_all();
+        sys.refresh_processes();
+
+        for conn in &mut connections {
+            if let Some(pid) = conn.pid {
+                if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
+                    conn.process_name = Some(process.name().to_string());
+                }
+            }
+        }
         
         Ok(connections)
     }
@@ -801,7 +844,7 @@ impl NetworkCollector {
     }
     
     // Get socket byte counts - platform-specific implementations
-    async fn get_socket_byte_counts(&self, pid: Option<u32>, _connection_key: &ConnectionKey) -> (u64, u64) {
+async fn get_socket_byte_counts(&self, pid: Option<u32>, _connection_key: &ConnectionKey) -> (u64, u64) {
         #[cfg(target_os = "linux")]
         {
             // For Linux, get per-process network statistics from /proc/{pid}/net/dev
@@ -819,10 +862,39 @@ impl NetworkCollector {
             self.get_macos_connection_bytes(pid, connection_key).await
         }
         
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(target_os = "windows")]
         {
-            // For other platforms, use system-wide statistics
-            self.get_system_network_bytes().await
+            // For Windows, use sysinfo to get network interface statistics
+            // Windows fallback using netstat
+            let mut total_rx = 0u64;
+            let mut total_tx = 0u64;
+            
+            if let Ok(output) = Command::new("netstat")
+                .args(["-e"])
+                .output()
+            {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                for line in output_str.lines().skip(4) { // Skip headers
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 4 {
+                        if let (Ok(rx), Ok(tx)) = (
+                            parts[1].replace(",", "").parse::<u64>(),
+                            parts[2].replace(",", "").parse::<u64>()
+                        ) {
+                            total_rx += rx;
+                            total_tx += tx;
+                        }
+                    }
+                }
+            }
+            
+            (total_tx, total_rx)
+        }
+        
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            // For other platforms, return zeros
+            (0, 0)
         }
     }
     

@@ -374,19 +374,39 @@ async fn analyze_process_event(
         // Windows detection (kept for reference)
         #[cfg(windows)]
         {
-            if self.is_suspicious_process_name(&process_name) {
+            // For Windows, check process name against known suspicious patterns
+            let suspicious_patterns = [
+                "rundll32", "regsvr32", "powershell", "cmd", "wscript",
+                "cscript", "mshta", "certutil", "bitsadmin", "net",
+                "sc", "at", "schtasks", "reg", "whoami",
+            ];
+            
+            let name_lower = process_name.to_lowercase();
+            if suspicious_patterns.iter().any(|pattern| name_lower.contains(*pattern)) {
                 let base_risk = 0.5;
-                let adjusted_risk = self.calculate_context_aware_risk(
-                    &process_name, 
-                    &process_path, 
-                    base_risk
-                );
+                
+                // Calculate risk based on process context
+                let mut risk_multiplier = 1.0;
+                
+                // Check process path - higher risk if in suspicious locations
+                if self.is_suspicious_process_path(&process_path) {
+                    risk_multiplier *= 1.5;
+                }
+                
+                // Check parent process - higher risk if parent is unusual
+                if let Some(parent) = tracker.processes.get(&parent_pid) {
+                    if self.is_browser_process(&parent.name) {
+                        risk_multiplier *= 2.0; // Very suspicious if launched from browser
+                    }
+                }
+                
+                let adjusted_risk = base_risk * risk_multiplier;
                 
                 let (should_suppress, severity_multiplier) = self.should_suppress_alert(
                     tracker, 
                     &process_name
                 );
-
+                
                 if !should_suppress {
                     let final_risk = adjusted_risk * severity_multiplier;
                     let severity = if final_risk >= 0.7 {
@@ -396,12 +416,12 @@ async fn analyze_process_event(
                     } else {
                         AlertSeverity::Low
                     };
-
+                    
                     alerts.push(self.create_alert(
                         InjectionEventType::SuspiciousProcess,
                         severity,
-                        format!("Suspicious process name: {}", process_name),
-                        format!("Process {} (PID: {}) has a suspicious name", process_name, pid),
+                        format!("Suspicious Windows process: {}", process_name),
+                        format!("Process {} (PID: {}) matches known suspicious pattern", process_name, pid),
                         final_risk,
                         vec![pid],
                     ));

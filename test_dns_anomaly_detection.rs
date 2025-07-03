@@ -187,23 +187,17 @@ async fn test_dns_anomaly_detection() -> anyhow::Result<()> {
     println!("\n💾 Test 5: Data exfiltration detection");
     
     // Send a batch of data exfiltration events
-    let mut tasks = Vec::new();
+    // Send data exfiltration events sequentially
     for i in 0..20 {
-        tasks.push(async move {
-            let large_response_event = create_dns_event_with_response(
-                &format!("data-exfil-{}.com", i),
-                "standard-udp",
-                Some(7777),
-                Some("exfil_process".to_string()),
-                200_000, // 200KB per response * 20 = 4MB total
-            );
-            detector.process_event(&large_response_event).await.expect("Failed to process data exfil event");
-        });
-    }
-    
-    // Wait for all events to be processed
-    for task in tasks {
-        task.await.expect("Failed to process data exfil event");
+        let large_response_event = create_dns_event_with_response(
+            &format!("data-exfil-{}.com", i),
+            "standard-udp",
+            Some(7777),
+            Some("exfil_process".to_string()),
+            200_000, // 200KB per response * 20 = 4MB total
+        );
+        detector.process_event(&large_response_event).await.expect("Failed to process data exfil event");
+        tokio::time::sleep(Duration::from_millis(10)).await; // Small delay between events
     }
     
     // Give a small window for alert processing
