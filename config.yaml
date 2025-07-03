@@ -37,16 +37,269 @@ detectors:
   behavioral:
     enabled: true
     scan_interval_ms: 2000
-    alert_threshold: 0.6
-    prevention_threshold: 0.8
+    alert_threshold: 0.4  # Lower to catch more suspicious behavior
+    prevention_threshold: 0.8  # Keep prevention threshold high to avoid false positives
     track_api_calls: true
     monitor_memory_operations: true
     monitor_thread_operations: true
     cross_platform_detection: true
-    system_process_contexts: {}
-    alert_frequency_limits: {}
-    path_context_rules: {}
-    network_behavior_rules: {}
+    system_process_contexts:
+      # Linux processes
+      Xwayland:
+        expected_paths:
+          - "/usr/bin/Xwayland"
+        max_instances: 1
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 4.0
+      pipewire:
+        expected_paths:
+          - "/usr/bin/pipewire"
+        max_instances: 5
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 4.0
+      wireplumber:
+        expected_paths:
+          - "/usr/bin/wireplumber"
+        max_instances: 2
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 4.0
+      gnome-shell:
+        expected_paths:
+          - "/usr/bin/gnome-shell"
+          - "/usr/lib/gnome-shell"
+        max_instances: 1
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 4.0
+      gnome-keyring-daemon:
+        expected_paths:
+          - "/usr/bin/gnome-keyring-daemon"
+        max_instances: 1
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 4.0
+      gnome-system-monitor:
+        expected_paths:
+          - "/usr/bin/gnome-system-monitor"
+        max_instances: 1
+        baseline_risk_reduction: 0.8
+        elevated_risk_multiplier: 3.0
+      gjs-console:
+        expected_paths:
+          - "/usr/bin/gjs-console"
+          - "/usr/bin/gjs"
+        max_instances: 10
+        baseline_risk_reduction: 0.8
+        elevated_risk_multiplier: 3.0
+      systemd:
+        expected_paths:
+          - "/sbin/"
+          - "/bin/"
+          - "/usr/sbin/"
+        max_instances: 1
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 5.0
+      
+      # Windows processes
+      svchost:
+        expected_paths:
+          - "C:\\Windows\\System32\\"
+          - "C:\\Windows\\SysWOW64\\"
+        max_instances: 30
+        baseline_risk_reduction: 0.8
+        elevated_risk_multiplier: 4.0
+      lsass:
+        expected_paths:
+          - "C:\\Windows\\System32\\"
+        max_instances: 1
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 5.0
+      csrss:
+        expected_paths:
+          - "C:\\Windows\\System32\\"
+        max_instances: 4
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 5.0
+      
+      # macOS processes
+      mdworker_shared:
+        expected_paths:
+          - "/System/Library/Frameworks/CoreServices.framework/"
+          - "/usr/libexec/"
+        max_instances: 20
+        baseline_risk_reduction: 0.7
+        elevated_risk_multiplier: 2.5
+      sharingd:
+        expected_paths:
+          - "/usr/libexec/"
+          - "/System/Library/"
+        max_instances: 1
+        baseline_risk_reduction: 0.8
+        elevated_risk_multiplier: 3.0
+      ReportCrash:
+        expected_paths:
+          - "/System/Library/CoreServices/"
+        max_instances: 5
+        baseline_risk_reduction: 0.9
+        elevated_risk_multiplier: 4.0
+    alert_frequency_limits:
+      # Linux-specific alerts
+      ptrace_injection:
+        max_alerts_per_hour: 2
+        cooldown_multiplier: 0.2  # Very critical, reduce frequency aggressively
+      so_injection:
+        max_alerts_per_hour: 2
+        cooldown_multiplier: 0.2
+      linux_shell_pattern:
+        max_alerts_per_hour: 8
+        cooldown_multiplier: 0.4
+      linux_memory_map:
+        max_alerts_per_hour: 5
+        cooldown_multiplier: 0.3
+      
+      # Cross-platform alerts
+      suspicious_shell:
+        max_alerts_per_hour: 3
+        cooldown_multiplier: 0.3
+      process_injection:
+        max_alerts_per_hour: 3
+        cooldown_multiplier: 0.3
+      memory_operation:
+        max_alerts_per_hour: 5
+        cooldown_multiplier: 0.2
+      suspicious_path:
+        max_alerts_per_hour: 8
+        cooldown_multiplier: 0.6
+      
+      # Windows-specific alerts
+      dll_injection:
+        max_alerts_per_hour: 3
+        cooldown_multiplier: 0.3
+      process_hollowing:
+        max_alerts_per_hour: 10
+        cooldown_multiplier: 0.8
+      token_manipulation:
+        max_alerts_per_hour: 3
+        cooldown_multiplier: 0.3
+      
+      # macOS-specific alerts
+      macos_task_port:
+        max_alerts_per_hour: 3
+        cooldown_multiplier: 0.3
+      dylib_injection:
+        max_alerts_per_hour: 3
+        cooldown_multiplier: 0.3
+      macos_shell:
+        max_alerts_per_hour: 5
+        cooldown_multiplier: 0.5
+    path_context_rules:
+      linux_tmp:
+        patterns:
+          - "/tmp/"
+          - "/var/tmp/"
+          - "/dev/shm/"
+        alert_threshold_multiplier: 2.0
+        max_alerts_per_hour: 5
+        context_type: SystemTemp
+      linux_binary:
+        patterns:
+          - "/bin/"
+          - "/sbin/"
+          - "/usr/bin/"
+          - "/usr/sbin/"
+        alert_threshold_multiplier: 0.5
+        max_alerts_per_hour: 5
+        context_type: SystemBinary
+      browser_cache:
+        patterns:
+          - "/.cache/mozilla/"
+          - "/.cache/google-chrome/"
+          - "/.cache/chromium/"
+        alert_threshold_multiplier: 2.0
+        max_alerts_per_hour: 8
+        context_type: BrowserData
+
+      # Windows path contexts
+      windows_temp:
+        patterns:
+          - "C:\\Windows\\Temp\\"
+          - "C:\\Users\\*\\AppData\\Local\\Temp\\"
+          - "C:\\Windows\\System32\\config\\systemprofile\\AppData\\Local\\Temp\\"
+        alert_threshold_multiplier: 1.5
+        max_alerts_per_hour: 10
+        context_type: SystemTemp
+      windows_system:
+        patterns:
+          - "C:\\Windows\\System32\\"
+          - "C:\\Windows\\SysWOW64\\"
+          - "C:\\Windows\\"
+        alert_threshold_multiplier: 0.5
+        max_alerts_per_hour: 5
+        context_type: SystemBinary
+      windows_browser_cache:
+        patterns:
+          - "C:\\Users\\*\\AppData\\Local\\Google\\Chrome\\User Data\\"
+          - "C:\\Users\\*\\AppData\\Local\\Mozilla\\Firefox\\Profiles\\"
+          - "C:\\Users\\*\\AppData\\Local\\Microsoft\\Edge\\User Data\\"
+        alert_threshold_multiplier: 2.0
+        max_alerts_per_hour: 8
+        context_type: BrowserData
+
+      # macOS path contexts
+      macos_temp:
+        patterns:
+          - "/private/tmp/"
+          - "/private/var/tmp/"
+          - "/Library/Caches/"
+        alert_threshold_multiplier: 1.5
+        max_alerts_per_hour: 10
+        context_type: SystemTemp
+      macos_system:
+        patterns:
+          - "/System/Library/"
+          - "/usr/libexec/"
+          - "/usr/bin/"
+          - "/usr/sbin/"
+        alert_threshold_multiplier: 0.5
+        max_alerts_per_hour: 5
+        context_type: SystemBinary
+      macos_browser_cache:
+        patterns:
+          - "/Library/Caches/Mozilla/"
+          - "/Library/Caches/Google/Chrome/"
+          - "/Library/Application Support/Firefox/"
+        alert_threshold_multiplier: 2.0
+        max_alerts_per_hour: 8
+        context_type: BrowserData
+    network_behavior_rules:
+      linux_network_monitor:
+        process_patterns:
+          - "nc"
+          - "netcat"
+          - "socat"
+          - "ncat"
+        suspicious_network_threshold: 0.7
+        max_network_alerts_per_hour: 5
+        whitelisted_ports: [80, 443, 53, 22, 3306]
+        behavior_tolerance: Medium
+      linux_dns_monitor:
+        process_patterns:
+          - "dig"
+          - "host"
+          - "nslookup"
+        suspicious_network_threshold: 0.6
+        max_network_alerts_per_hour: 10
+        whitelisted_ports: [53, 853]
+        behavior_tolerance: Low
+      linux_file_transfer:
+        process_patterns:
+          - "scp"
+          - "rsync"
+          - "sftp"
+          - "wget"
+          - "curl"
+        suspicious_network_threshold: 0.5
+        max_network_alerts_per_hour: 15
+        whitelisted_ports: [22, 80, 443]
+        behavior_tolerance: Medium
     time_based_risk_adjustment:
       business_hours_multiplier: 0.0
       after_hours_multiplier: 0.0
@@ -59,11 +312,85 @@ detectors:
         - tokio-runtime-w
         - edr-agent
         - rust_edr_agent
+        - systemd
+        - systemd-journal
+        - systemd-udevd
+        - systemd-resolved
+        - systemd-timesyncd
+        - warp-terminal
+        - merge_thread_0
+      # GNOME core processes
+        - gnome-shell
+        - gnome-session-binary
+        - gnome-keyring-daemon
+        - gnome-system-monitor
+        - gjs-console
+        - gjs
+        # Display and multimedia processes
+        - Xwayland
+        - pipewire
+        - pipewire-pulse
+        - wireplumber
+        - module-rt
+        - pw-data-loop
+        - Xwaylan:disk$0
+        # GNOME helper threads
+        - gmain
+        - gdbus
+        - timer
+        - pool-spawner
+        - JS Helper
+        - KMS thread
+        - dconf worker
+        # GNOME system monitor threads
+        - gnome-sy:gdrv0
+        - gnome-s:disk$0
+        - gnome-:traceq0
+        - gnome-shel:sh0
+        - gnome-syst:sh0
       process_paths:
         - target/debug/
         - target/release/
-      command_line_patterns: []
-      parent_process_names: []
+        - /lib/systemd/systemd
+        - /usr/lib/systemd/systemd
+        - /usr/bin/systemctl
+        - /opt/warpdotdev/warp-terminal/warp
+        # Display and multimedia paths
+        - /usr/bin/Xwayland
+        - /usr/bin/pipewire
+        - /usr/bin/wireplumber
+        # GNOME core paths
+        - /usr/bin/gnome-shell
+        - /usr/libexec/gnome-session-binary
+        - /usr/bin/gnome-keyring-daemon
+        - /usr/bin/gnome-system-monitor
+        - /usr/bin/gjs
+        - /usr/bin/gjs-console
+        # GNOME services
+        - /usr/libexec/gnome-shell-calendar-server
+        - /usr/libexec/at-spi2-registryd
+        - /usr/libexec/xdg-desktop-portal-gnome
+      command_line_patterns:
+        - "systemctl status"
+        - "systemctl is-active"
+        - "systemctl is-enabled"
+        - "journalctl -xe"
+        - "journalctl -u"
+      parent_process_names:
+        - systemd
+        - systemd-journal
+        - init
+        - warp-terminal
+        # GNOME parent processes
+        - gnome-shell
+        - gnome-session-binary
+        - gnome-keyring-daemon
+        - gnome-system-monitor
+        # Display and multimedia parents
+        - Xwayland
+        - pipewire
+        - pipewire-pulse
+        - wireplumber
       agent_processes:
         - tokio-runtime-w
         - edr-agent
