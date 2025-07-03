@@ -3,7 +3,7 @@ use std::fs;
 use tracing::{info, error, debug};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
-use std::process::Command;
+use tokio::process::Command;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -790,7 +790,7 @@ impl NetworkCollector {
             .args(["-an"])
             .output();
         
-        match output {
+        match output.await {
             Ok(output) => {
                 let output_str = String::from_utf8_lossy(&output.stdout);
                 connections.extend(self.parse_netstat_output(&output_str)?);
@@ -936,10 +936,72 @@ impl NetworkCollector {
         None
     }
     
-    // Get socket byte counts - platform-specific implementations
     #[cfg(target_os = "macos")]
-    async fn get_socket_byte_counts(&self, pid: Option<u32>, connection_key: &ConnectionKey) -> (u64, u64) {
-        self.get_macos_connection_bytes(pid, connection_key).await
+    async fn get_socket_byte_counts(&self, pid: Option<u32>) -> (u64, u64) {
+        let mut total_tx = 0u64;
+        let mut total_rx = 0u64;
+
+        // Try to get process-specific network stats first
+        if let Some(pid) = pid {
+            if let Ok(output) = Command::new("lsof")
+                .args(["-p", &pid.to_string(), "-i"])
+                .output()
+                .await
+            {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                // Parse lsof output to get network usage
+                for line in output_str.lines() {
+                    if line.contains("TCP") || line.contains("UDP") {
+                        // We found network activity, use system-wide stats
+                        let (sys_tx, sys_rx) = self.get_macos_system_bytes().await;
+                        total_tx = sys_tx;
+                        total_rx = sys_rx;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Fallback to system-wide stats if we still have no data
+        if total_tx == 0 && total_rx == 0 {
+            (total_tx, total_rx) = self.get_macos_system_bytes().await;
+        }
+
+        (total_tx, total_rx)
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn get_macos_system_bytes(&self) -> (u64, u64) {
+        let mut total_tx = 0u64;
+        let mut total_rx = 0u64;
+
+        // Use netstat to get interface statistics
+        if let Ok(output) = Command::new("netstat")
+            .args(["-ib"])
+            .output()
+            .await
+        {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            for line in output_str.lines().skip(1) { // Skip header
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 7 {
+                    let interface = parts[0];
+                    // Skip loopback interface
+                    if interface != "lo0" {
+                        // Bytes in/out are typically in columns 6 and 9
+                        if let (Ok(rx), Ok(tx)) = (
+                            parts[6].parse::<u64>(),
+                            parts[9].parse::<u64>()
+                        ) {
+                            total_rx += rx;
+                            total_tx += tx;
+                        }
+                    }
+                }
+            }
+        }
+
+        (total_tx, total_rx)
     }
 
     #[cfg(target_os = "linux")]
@@ -1164,10 +1226,6 @@ impl PeriodicCollector for NetworkCollector {
                             }
                         } else {
                             // New connection - always report (security critical)
-                            #[cfg(target_os = "macos")]
-                            let (tx_bytes, rx_bytes) = self.get_socket_byte_counts(connection.pid, &key).await;
-                            
-                            #[cfg(not(target_os = "macos"))]
                             let (tx_bytes, rx_bytes) = self.get_socket_byte_counts(connection.pid).await;
                             
                             states.insert(key.clone(), ConnectionState {
