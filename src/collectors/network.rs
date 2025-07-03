@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use std::fs;
 use tracing::{info, error, debug};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
@@ -944,10 +945,76 @@ impl NetworkCollector {
     #[cfg(target_os = "linux")]
     async fn get_socket_byte_counts(&self, pid: Option<u32>) -> (u64, u64) {
         if let Some(pid) = pid {
-            self.get_process_network_bytes(pid).await
+            let net_dev_path = format!("/proc/{}/net/dev", pid);
+            if let Ok(content) = fs::read_to_string(&net_dev_path) {
+                let mut total_tx = 0u64;
+                let mut total_rx = 0u64;
+                
+                for line in content.lines().skip(2) { // Skip header lines
+                    if let Some(colon_pos) = line.find(':') {
+                        let interface_name = line[..colon_pos].trim();
+                        
+                        // Skip loopback interface
+                        if interface_name == "lo" {
+                            continue;
+                        }
+                        
+                        let stats_part = &line[colon_pos + 1..];
+                        let stats: Vec<&str> = stats_part.split_whitespace().collect();
+                        
+                        if stats.len() >= 9 {
+                            // bytes: received (index 0), transmitted (index 8)
+                            if let (Ok(rx), Ok(tx)) = (stats[0].parse::<u64>(), stats[8].parse::<u64>()) {
+                                total_rx += rx;
+                                total_tx += tx;
+                            }
+                        }
+                    }
+                }
+                
+                if total_tx > 0 || total_rx > 0 {
+                    return (total_tx, total_rx);
+                }
+            }
+            
+            // Process-specific stats not available or empty, fall back to system-wide
+            self.get_system_network_bytes().await
         } else {
+            // Use system-wide stats
             self.get_system_network_bytes().await
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn get_system_network_bytes(&self) -> (u64, u64) {
+        let mut total_rx = 0u64;
+        let mut total_tx = 0u64;
+        
+        if let Ok(dev_content) = fs::read_to_string("/proc/net/dev") {
+            for line in dev_content.lines().skip(2) { // Skip header lines
+                if let Some(colon_pos) = line.find(':') {
+                    let interface_name = line[..colon_pos].trim();
+                    
+                    // Skip loopback interface
+                    if interface_name == "lo" {
+                        continue;
+                    }
+                    
+                    let stats_part = &line[colon_pos + 1..];
+                    let stats: Vec<&str> = stats_part.split_whitespace().collect();
+                    
+                    if stats.len() >= 9 {
+                        // bytes: received (index 0), transmitted (index 8)
+                        if let (Ok(rx), Ok(tx)) = (stats[0].parse::<u64>(), stats[8].parse::<u64>()) {
+                            total_rx += rx;
+                            total_tx += tx;
+                        }
+                    }
+                }
+            }
+        }
+        
+        (total_tx, total_rx)
     }
 
     #[cfg(target_os = "windows")]
@@ -982,162 +1049,6 @@ impl NetworkCollector {
         (0, 0)
     }
     }
-    
-    // Linux-specific: Get network byte counts for a specific process
-    #[cfg(target_os = "linux")]
-    async fn get_process_network_bytes(&self, pid: u32) -> (u64, u64) {
-        use std::fs;
-        
-        // Try to read process-specific network device statistics
-        let net_dev_path = format!("/proc/{}/net/dev", pid);
-        if let Ok(content) = fs::read_to_string(&net_dev_path) {
-            let mut total_tx = 0u64;
-            let mut total_rx = 0u64;
-            
-            for line in content.lines().skip(2) { // Skip header lines
-                if let Some(colon_pos) = line.find(':') {
-                    let interface_name = line[..colon_pos].trim();
-                    
-                    // Skip loopback interface
-                    if interface_name == "lo" {
-                        continue;
-                    }
-                    
-                    let stats_part = &line[colon_pos + 1..];
-                    let stats: Vec<&str> = stats_part.split_whitespace().collect();
-                    
-                    if stats.len() >= 9 {
-                        // bytes: received (index 0), transmitted (index 8)
-                        if let (Ok(rx), Ok(tx)) = (stats[0].parse::<u64>(), stats[8].parse::<u64>()) {
-                            total_rx += rx;
-                            total_tx += tx;
-                        }
-                    }
-                }
-            }
-            
-            if total_tx > 0 || total_rx > 0 {
-                return (total_tx, total_rx);
-            }
-        }
-        
-        // Process-specific stats not available or empty, fall back to system-wide
-        self.get_system_network_bytes().await
-    }
-    
-    // Get system-wide network byte counts
-    // macOS-specific: Get connection-specific byte counts using netstat -i and lsof
-    #[cfg(target_os = "macos")]
-    async fn get_macos_connection_bytes(&self, _pid: Option<u32>, connection_key: &ConnectionKey) -> (u64, u64) {
-        // Use netstat -i to get interface statistics, then correlate with connection
-        match StdCommand::new("netstat")
-            .args(["-ib"])
-            .output()
-        {
-            Ok(output) => {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                self.parse_netstat_interface_stats(&output_str, connection_key)
-            }
-            Err(_) => {
-                // Fallback to basic estimates
-                (0, 0)
-            }
-        }
-    }
-    
-    #[cfg(target_os = "macos")]
-    fn parse_netstat_interface_stats(&self, output: &str, _connection_key: &ConnectionKey) -> (u64, u64) {
-        let mut total_tx = 0u64;
-        let mut total_rx = 0u64;
-        
-        for line in output.lines().skip(1) { // Skip header
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 10 {
-                // netstat -ib format: Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
-                if let (Ok(ibytes), Ok(obytes)) = (parts[6].parse::<u64>(), parts[9].parse::<u64>()) {
-                    // Skip loopback interface
-                    if !parts[0].starts_with("lo") {
-                        total_rx += ibytes;
-                        total_tx += obytes;
-                    }
-                }
-            }
-        }
-        
-        (total_tx, total_rx)
-    }
-    
-    #[cfg(target_os = "linux")]
-    async fn get_system_network_bytes(&self) -> (u64, u64) {
-        #[cfg(target_os = "linux")]
-        {
-            use std::fs;
-            
-            if let Ok(dev_content) = fs::read_to_string("/proc/net/dev") {
-                let mut total_rx = 0u64;
-                let mut total_tx = 0u64;
-                
-                for line in dev_content.lines().skip(2) { // Skip header lines
-                    if let Some(colon_pos) = line.find(':') {
-                        let interface_name = line[..colon_pos].trim();
-                        
-                        // Skip loopback interface
-                        if interface_name == "lo" {
-                            continue;
-                        }
-                        
-                        let stats_part = &line[colon_pos + 1..];
-                        let stats: Vec<&str> = stats_part.split_whitespace().collect();
-                        
-                        if stats.len() >= 9 {
-                            // bytes: received (index 0), transmitted (index 8)
-                            if let (Ok(rx), Ok(tx)) = (stats[0].parse::<u64>(), stats[8].parse::<u64>()) {
-                                total_rx += rx;
-                                total_tx += tx;
-                            }
-                        }
-                    }
-                }
-                
-                return (total_tx, total_rx);
-            }
-            
-            (0, 0)
-        }
-        
-        #[cfg(not(target_os = "linux"))]
-        {
-            // Use sysinfo for cross-platform compatibility
-            let mut sys = sysinfo::System::new();
-            sys.refresh_all();
-            
-            let mut total_rx = 0u64;
-            let mut total_tx = 0u64;
-            
-            // Try alternative method for network byte counts
-            if let Ok(output) = std::process::Command::new("netstat")
-                .args(["-ib"])
-                .output()
-            {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                for line in output_str.lines().skip(1) {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 10 && !parts[0].starts_with("lo") {
-                        if let (Ok(rx), Ok(tx)) = (parts[6].parse::<u64>(), parts[9].parse::<u64>()) {
-                            total_rx += rx;
-                            total_tx += tx;
-                        }
-                    }
-                }
-            }
-            
-            (total_tx, total_rx)
-        }
-    }
-    
-    
-    
-    
     
 
 #[async_trait::async_trait]
