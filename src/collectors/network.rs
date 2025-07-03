@@ -16,6 +16,9 @@ use std::fs;
 #[cfg(target_os = "macos")]
 use std::process::Command as StdCommand;
 
+#[cfg(target_os = "windows")]
+use anyhow::anyhow;
+
 use crate::config::NetworkMonitorConfig;
 use crate::events::{Event, EventType, EventData, NetworkEventData, NetworkDirection};
 use crate::collectors::{Collector, PeriodicCollector};
