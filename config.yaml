@@ -23,7 +23,7 @@ collectors:
     - .lock
     - .swp
     - .pid
-    max_file_size_mb: 10  # Reduced from 100MB to 10MB for faster hashing
+    max_file_size_mb: 50  # Balanced size for security coverage and performance
     calculate_hashes: true
   network_monitor:
     enabled: true

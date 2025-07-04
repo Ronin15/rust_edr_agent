@@ -557,6 +557,29 @@ impl SecurityAwareDeduplicator {
                     }
                 }
             }
+            
+            #[cfg(target_os = "windows")]
+            {
+                // Windows high-frequency paths get 1/3 of normal rate
+                let windows_noisy_paths = [
+                    "C:\\Windows\\Temp\\",
+                    "C:\\Windows\\Prefetch\\",
+                    "C:\\ProgramData\\Microsoft\\Windows\\WER\\",
+                    "C:\\Windows\\System32\\winevt\\Logs\\",
+                    "C:\\Users\\.*\\AppData\\Local\\Temp\\",
+                    "C:\\Windows\\SoftwareDistribution\\",
+                    "C:\\Windows\\Logs\\",
+                    "C:\\$Recycle.Bin\\",
+                ];
+                
+                for noisy_path in &windows_noisy_paths {
+                    // Use case-insensitive comparison for Windows
+                    if path.to_lowercase().contains(&noisy_path.to_lowercase()) {
+                        debug!("Applying aggressive rate limit for Windows noisy path: {}", path);
+                        return base_rate.max(1) / 3; // At least 1 event per minute
+                    }
+                }
+            }
         }
         
         base_rate
@@ -583,6 +606,40 @@ impl SecurityAwareDeduplicator {
                     }
                 }
             }
+            
+            #[cfg(target_os = "linux")]
+            {
+                // Lower threshold for noisy Linux paths
+                let linux_noisy_paths = [
+                    "/proc/",
+                    "/sys/",
+                    "/run/user/",
+                    "/var/cache/",
+                ];
+                
+                for noisy_path in &linux_noisy_paths {
+                    if path.contains(noisy_path) {
+                        return 2; // Very low threshold for noisy paths
+                    }
+                }
+            }
+            
+            #[cfg(target_os = "windows")]
+            {
+                // Lower threshold for noisy Windows paths
+                let windows_noisy_paths = [
+                    "C:\\Windows\\Temp\\",
+                    "C:\\Windows\\Prefetch\\",
+                    "C:\\Users\\.*\\AppData\\Local\\Temp\\",
+                    "C:\\$Recycle.Bin\\",
+                ];
+                
+                for noisy_path in &windows_noisy_paths {
+                    if path.to_lowercase().contains(&noisy_path.to_lowercase()) {
+                        return 2; // Very low threshold for noisy paths
+                    }
+                }
+            }
         }
         
         self.config.burst_threshold
@@ -605,6 +662,40 @@ impl SecurityAwareDeduplicator {
                 
                 for noisy_path in &macos_noisy_paths {
                     if path.contains(noisy_path) {
+                        return 5; // 5 second window for noisy paths
+                    }
+                }
+            }
+            
+            #[cfg(target_os = "linux")]
+            {
+                // Shorter window for noisy Linux paths
+                let linux_noisy_paths = [
+                    "/proc/",
+                    "/sys/",
+                    "/run/user/",
+                    "/var/cache/",
+                ];
+                
+                for noisy_path in &linux_noisy_paths {
+                    if path.contains(noisy_path) {
+                        return 5; // 5 second window for noisy paths
+                    }
+                }
+            }
+            
+            #[cfg(target_os = "windows")]
+            {
+                // Shorter window for noisy Windows paths
+                let windows_noisy_paths = [
+                    "C:\\Windows\\Temp\\",
+                    "C:\\Windows\\Prefetch\\",
+                    "C:\\Users\\.*\\AppData\\Local\\Temp\\",
+                    "C:\\$Recycle.Bin\\",
+                ];
+                
+                for noisy_path in &windows_noisy_paths {
+                    if path.to_lowercase().contains(&noisy_path.to_lowercase()) {
                         return 5; // 5 second window for noisy paths
                     }
                 }
