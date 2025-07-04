@@ -1,12 +1,13 @@
 use anyhow::Result;
-use tracing::{info, error};
+use tracing::{debug, error, info};
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
+use std::collections::HashMap;
+
 use crate::config::RegistryMonitorConfig;
 use crate::events::{Event, EventType, EventData, RegistryEventData};
 use crate::collectors::{Collector, EventCollector};
 use crate::agent::CollectorStatus;
-
 #[derive(Debug)]
 pub struct RegistryCollector {
     config: RegistryMonitorConfig,
@@ -16,18 +17,154 @@ pub struct RegistryCollector {
     agent_id: String,
     events_collected: Arc<RwLock<u64>>,
     last_error: Arc<RwLock<Option<String>>>,
+    // Track last known state of registry keys for change detection
+    key_state_cache: Arc<RwLock<HashMap<String, RegistryKeyState>>>,
+}
+
+#[derive(Default, Clone, Debug)]
+struct RegistryKeyState {
+    subkeys: HashMap<String, u64>, // key name -> last write time
 }
 
 impl RegistryCollector {
     #[cfg(windows)]
-    async fn get_value_name(&self, key_handle: &windows::Win32::System::Registry::HKEY) -> Option<String> {
+    async fn detect_registry_changes(
+        &self,
+        key_handle: &windows::Win32::System::Registry::HKEY,
+        key_path: &str
+    ) -> Vec<(String, bool)> { // (name, is_new)
         use windows::Win32::System::Registry::*;
         use std::ffi::OsString;
         use std::os::windows::ffi::OsStringExt;
         
+        let mut changes = Vec::new();
+        let mut subkey_count = 0;
+        let mut max_subkey_len = 0;
+        let mut class_len = 0;
+        
+        // Query key info to get subkey count and lengths
         unsafe {
-            let mut name_size = 0;
+            let result = RegQueryInfoKeyW(
+                *key_handle,
+                windows::core::PWSTR::null(),
+                None,
+                None,
+                Some(&mut subkey_count),
+                Some(&mut max_subkey_len),
+                Some(&mut class_len),
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            
+            if result.is_err() {
+                error!("Failed to query key info for {}: {:?}", key_path, result.err());
+                return changes;
+            }
+            
+            if subkey_count == 0 {
+                // No subkeys, check for value changes
+                let values = self.enumerate_registry_values(key_handle).await;
+                if !values.is_empty() {
+                    changes.push((key_path.to_string(), false));
+                }
+                return changes;
+            }
+            
+            // Enumerate all subkeys
+            let mut current_subkeys = HashMap::new();
+            
+            for i in 0..subkey_count {
+                let mut name_buffer = vec![0u16; (max_subkey_len + 1) as usize];
+                let mut name_size = max_subkey_len + 1;
+                let mut last_write_time = windows::Win32::Foundation::FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+                
+                let result = RegEnumKeyExW(
+                    *key_handle,
+                    i,
+                    windows::core::PWSTR(name_buffer.as_mut_ptr()),
+                    &mut name_size,
+                    None,
+                    windows::core::PWSTR::null(),
+                    None,
+                    Some(&mut last_write_time),
+                );
+                
+                if result.is_ok() {
+                    name_buffer.truncate(name_size as usize);
+                    let subkey_name = OsString::from_wide(&name_buffer)
+                        .into_string()
+                        .unwrap_or_else(|_| "<invalid name>".to_string());
+                    
+                    // Convert FILETIME to u64 for storage
+                    let last_write_u64 = ((last_write_time.dwHighDateTime as u64) << 32) | (last_write_time.dwLowDateTime as u64);
+                    
+                    // Store the subkey and its last write time
+                    current_subkeys.insert(subkey_name, last_write_u64);
+                }
+            }
+            
+            // Get last known state from cache or create new
+            let cache_key = format!("reg_state:{}", key_path);
+            let last_state = self.get_state_cache(&cache_key).await;
+            
+            // Compare current vs last state
+            for (name, write_time) in &current_subkeys {
+                match last_state.subkeys.get(name) {
+                    Some(&last_time) if last_time != *write_time => {
+                        // Modified subkey
+                        let full_path = format!("{}\\\"{}", key_path, name);
+                        changes.push((full_path, false));
+                    },
+                    None => {
+                        // New subkey
+                        let full_path = format!("{}\\\"{}", key_path, name);
+                        changes.push((full_path, true));
+                    },
+                    _ => (), // No change
+                }
+            }
+            
+            // Check for deleted subkeys
+            for name in last_state.subkeys.keys() {
+                if !current_subkeys.contains_key(name) {
+                    let full_path = format!("{}\\\"{}", key_path, name);
+                    changes.push((full_path, false)); // false = modified (deleted)
+                }
+            }
+            
+            // Update cache with current state
+            self.update_state_cache(&cache_key, current_subkeys).await;
+        }
+        
+        changes
+    }
+    
+    async fn get_state_cache(&self, key: &str) -> RegistryKeyState {
+        let cache = self.key_state_cache.read().await;
+        cache.get(key).cloned().unwrap_or_default()
+    }
+    
+    async fn update_state_cache(&self, key: &str, subkeys: HashMap<String, u64>) {
+        let mut cache = self.key_state_cache.write().await;
+        let state = cache.entry(key.to_string()).or_insert_with(RegistryKeyState::default);
+        state.subkeys = subkeys;
+    }
+    
+    #[cfg(windows)]
+    async fn enumerate_registry_values(&self, key_handle: &windows::Win32::System::Registry::HKEY) -> Vec<(String, String, String)> {
+        use windows::Win32::System::Registry::*;
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        
+        let mut values = Vec::new();
+        
+        unsafe {
             let mut value_count = 0;
+            let mut max_value_name_len = 0;
+            let mut max_value_data_len = 0;
             
             // Get info about the key
             let result = RegQueryInfoKeyW(
@@ -39,140 +176,115 @@ impl RegistryCollector {
                 None,
                 None,
                 Some(&mut value_count),
-                Some(&mut name_size),
-                None,
+                Some(&mut max_value_name_len),
+                Some(&mut max_value_data_len),
                 None,
                 None,
             );
             
-            if result.is_err() || value_count == 0 {
-                return None;
+            if result.is_err() {
+                error!("Failed to query registry key info: {:?}", result.err());
+                return values;
             }
             
-            // Allocate buffer for the value name
-            let mut name_buffer = vec![0u16; name_size as usize + 1];
-            let mut name_size = name_size + 1;
-            
-            // Get the last modified value name
-            let result = RegEnumValueW(
-                *key_handle,
-                value_count - 1,
-                windows::core::PWSTR(name_buffer.as_mut_ptr()),
-                &mut name_size,
-                None,
-                None,
-                None,
-                None,
-            );
-            
-            if result.is_ok() {
-                name_buffer.truncate(name_size as usize);
-                let os_string = OsString::from_wide(&name_buffer);
-                os_string.into_string().ok()
-            } else {
-                None
-            }
-        }
-    }
-    
-    #[cfg(windows)]
-    async fn get_value_type(&self, key_handle: &windows::Win32::System::Registry::HKEY) -> Option<String> {
-        use windows::Win32::System::Registry::*;
-        
-        unsafe {
-            let mut value_type = REG_VALUE_TYPE::default();
-            
-            let result = RegQueryValueExW(
-                *key_handle,
-                windows::core::PCWSTR::null(),
-                None,
-                Some(&mut value_type),
-                None,
-                None,
-            );
-            
-            if result.is_ok() {
-                Some(match value_type.0 {
-                    1 => "REG_SZ".to_string(),
-                    2 => "REG_EXPAND_SZ".to_string(),
-                    3 => "REG_BINARY".to_string(),
-                    4 => "REG_DWORD".to_string(),
-                    5 => "REG_DWORD_BIG_ENDIAN".to_string(),
-                    6 => "REG_LINK".to_string(),
-                    7 => "REG_MULTI_SZ".to_string(),
-                    8 => "REG_RESOURCE_LIST".to_string(),
-                    11 => "REG_QWORD".to_string(),
-                    _ => format!("Unknown ({})", value_type.0),
-                })
-            } else {
-                None
-            }
-        }
-    }
-    
-    #[cfg(windows)]
-    async fn get_value_data(&self, key_handle: &windows::Win32::System::Registry::HKEY) -> Option<String> {
-        use windows::Win32::System::Registry::*;
-        
-        unsafe {
-            let mut data_size = 0;
-            let mut value_type = REG_VALUE_TYPE::default();
-            
-            // Get required buffer size
-            let result = RegQueryValueExW(
-                *key_handle,
-                windows::core::PCWSTR::null(),
-                None,
-                Some(&mut value_type),
-                None,
-                Some(&mut data_size),
-            );
-            
-            if result.is_err() || data_size == 0 {
-                return None;
+            if value_count == 0 {
+                debug!("No values found in registry key");
+                return values;
             }
             
-            let mut data_buffer = vec![0u8; data_size as usize];
+            debug!("Found {} values in registry key", value_count);
             
-            let result = RegQueryValueExW(
-                *key_handle,
-                windows::core::PCWSTR::null(),
-                None,
-                Some(&mut value_type),
-                Some(data_buffer.as_mut_ptr()),
-                Some(&mut data_size),
-            );
-            
-            if result.is_ok() {
-                match value_type.0 {
-                    1 | 2 => { // REG_SZ | REG_EXPAND_SZ
-                        let wide_str = std::slice::from_raw_parts(
-                            data_buffer.as_ptr() as *const u16,
-                            (data_size / 2) as usize,
-                        );
-                        String::from_utf16_lossy(wide_str)
-                            .trim_end_matches('\0')
-                            .to_string()
-                            .into()
-                    }
-                    4 => { // REG_DWORD
-                        let value = u32::from_ne_bytes(
-                            data_buffer[..4].try_into().unwrap_or_default()
-                        );
-                        Some(format!("{}", value))
-                    }
-                    11 => { // REG_QWORD
-                        let value = u64::from_ne_bytes(
-                            data_buffer[..8].try_into().unwrap_or_default()
-                        );
-                        Some(format!("{}", value))
-                    }
-                    _ => Some(format!("<{} bytes of binary data>", data_size)),
+            // Enumerate all values
+            for i in 0..value_count {
+                let mut name_buffer = vec![0u16; (max_value_name_len + 1) as usize];
+                let mut name_size = max_value_name_len + 1;
+let mut value_type = 0u32;
+                let mut data_buffer = vec![0u8; (max_value_data_len + 1) as usize];
+let mut data_size = max_value_data_len + 1;
+                
+                let result = RegEnumValueW(
+                    *key_handle,
+                    i,
+                    windows::core::PWSTR(name_buffer.as_mut_ptr()),
+                    &mut name_size,
+                    None,
+                    Some(&mut value_type),
+                    Some(data_buffer.as_mut_ptr()),
+                    Some(&mut data_size),
+                );
+                
+                if result.is_err() {
+error!("Failed to enumerate value {}: error code {}", i, result.err().unwrap().code().0);
+                    continue;
                 }
-            } else {
-                None
+                data_buffer.truncate(data_size as usize);
+                
+                if result.is_ok() {
+                    // Get value name
+                    name_buffer.truncate(name_size as usize);
+                    let value_name = OsString::from_wide(&name_buffer)
+                        .into_string()
+                        .unwrap_or_else(|_| "<invalid name>".to_string());
+                    
+                    // Get value type
+let type_str = match value_type {
+                        1 => "REG_SZ".to_string(),
+                        2 => "REG_EXPAND_SZ".to_string(),
+                        3 => "REG_BINARY".to_string(),
+                        4 => "REG_DWORD".to_string(),
+                        5 => "REG_DWORD_BIG_ENDIAN".to_string(),
+                        6 => "REG_LINK".to_string(),
+                        7 => "REG_MULTI_SZ".to_string(),
+                        8 => "REG_RESOURCE_LIST".to_string(),
+                        11 => "REG_QWORD".to_string(),
+_ => format!("Unknown ({})", value_type),
+                    };
+                    
+                    // Get value data
+let data_str = match value_type {
+                        1 | 2 => { // REG_SZ | REG_EXPAND_SZ
+                            if data_size >= 2 {
+                                let wide_str = std::slice::from_raw_parts(
+                                    data_buffer.as_ptr() as *const u16,
+                                    (data_size / 2) as usize,
+                                );
+                                String::from_utf16_lossy(wide_str)
+                                    .trim_end_matches('\0')
+                                    .to_string()
+                            } else {
+                                "<empty>".to_string()
+                            }
+                        }
+                        4 => { // REG_DWORD
+                            if data_size >= 4 {
+                                let value = u32::from_ne_bytes(
+                                    data_buffer[..4].try_into().unwrap_or_default()
+                                );
+                                format!("{} (0x{:08X})", value, value)
+                            } else {
+                                "<invalid>".to_string()
+                            }
+                        }
+                        11 => { // REG_QWORD
+                            if data_size >= 8 {
+                                let value = u64::from_ne_bytes(
+                                    data_buffer[..8].try_into().unwrap_or_default()
+                                );
+                                format!("{} (0x{:016X})", value, value)
+                            } else {
+                                "<invalid>".to_string()
+                            }
+                        }
+                        _ => format!("<{} bytes of binary data>", data_size),
+                    };
+                    
+                    values.push((value_name, type_str, data_str));
+                }
             }
         }
+        
+        debug!("Enumerated {} registry values", values.len());
+        values
     }
     
     #[cfg(windows)]
@@ -230,6 +342,7 @@ impl RegistryCollector {
             agent_id,
             events_collected: Arc::new(RwLock::new(0)),
             last_error: Arc::new(RwLock::new(None)),
+            key_state_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
     
@@ -316,6 +429,7 @@ impl Clone for RegistryCollector {
             agent_id: self.agent_id.clone(),
             events_collected: self.events_collected.clone(),
             last_error: self.last_error.clone(),
+            key_state_cache: self.key_state_cache.clone(),
         }
     }
 }
@@ -408,7 +522,7 @@ impl RegistryCollector {
         _hostname: String,
         _agent_id: String,
     ) {
-        info!("Starting async monitoring for registry key: {}", key_path);
+                debug!("Starting async monitoring for registry key: {}", key_path);
         
         // Parse the registry key path
         let (hkey, subkey) = Self::parse_registry_path(&key_path);
@@ -439,7 +553,7 @@ impl RegistryCollector {
                     hkey,
                     PCWSTR(subkey_wide.as_ptr()),
                     0,
-                    KEY_NOTIFY,
+                    KEY_NOTIFY | KEY_READ,
                     &mut key_handle,
                 );
                 
@@ -476,7 +590,7 @@ impl RegistryCollector {
                     break;
                 }
                 
-                info!("Successfully registered for registry notifications on: {}", key_path);
+                debug!("Successfully registered for registry notifications on: {}", key_path);
                 
                 // Wait for changes with periodic checks
                 loop {
@@ -489,31 +603,122 @@ impl RegistryCollector {
                     match wait_result {
                         WAIT_OBJECT_0 => {
                             // Registry change detected
-                            info!("Registry change detected in key: {}", key_path);
+                            debug!("Registry change detected in key: {}", key_path);
                             
-                            // Get registry value details
-                            let value_name = self.get_value_name(&key_handle).await;
-                            let value_type = self.get_value_type(&key_handle).await;
-                            let value_data = self.get_value_data(&key_handle).await;
+                            // Detect what specifically changed
+                            let changes = self.detect_registry_changes(&key_handle, &key_path).await;
                             let (process_id, process_name) = self.get_process_info().await;
                             
-                            // Create and send the event
-                            let registry_event = self.create_registry_event(
-                                EventType::RegistryKeyModified,
-                                key_path.clone(),
-                                value_name,
-                                value_type,
-                                value_data,
-                                None,
-                                process_id,
-                                process_name,
-                            );
-                            
-                            if let Err(e) = event_sender.send(registry_event).await {
-                                error!("Failed to send registry event: {}", e);
-                                *last_error.write().await = Some(format!("Failed to send event: {}", e));
+                            if !changes.is_empty() {
+                                debug!("Detected {} specific changes in {}", changes.len(), key_path);
+                                
+                                for (changed_key, is_new) in changes {
+                                    debug!("Registry {} changed: {}", 
+                                          if is_new { "key created" } else { "key modified" },
+                                          changed_key);
+                                    
+                                    // For each changed subkey, enumerate its values
+                                    let values = if changed_key.contains("\\") {
+                                        // Open the specific subkey
+                                        let (parent_hkey, subkey_path) = Self::parse_registry_path(&changed_key);
+                                        if !parent_hkey.is_invalid() {
+                                            let subkey_wide: Vec<u16> = OsStr::new(&subkey_path)
+                                                .encode_wide()
+                                                .chain(std::iter::once(0))
+                                                .collect();
+                                            let mut subkey_handle = HKEY::default();
+                                            let result = RegOpenKeyExW(
+                                                parent_hkey,
+                                                PCWSTR(subkey_wide.as_ptr()),
+                                                0,
+                                                KEY_READ,
+                                                &mut subkey_handle,
+                                            );
+                                            
+                                            if result.is_ok() {
+                                                let values = self.enumerate_registry_values(&subkey_handle).await;
+                                                let _ = RegCloseKey(subkey_handle);
+                                                values
+                                            } else {
+                                                Vec::new()
+                                            }
+                                        } else {
+                                            Vec::new()
+                                        }
+                                    } else {
+                                        self.enumerate_registry_values(&key_handle).await
+                                    };
+                                    
+                                    // Create event for the changed key
+                                    let event_type = if is_new { EventType::RegistryKeyCreated } else { EventType::RegistryKeyModified };
+                                    
+                                    if !values.is_empty() {
+                                        for (value_name, value_type, value_data) in values {
+                                            let registry_event = self.create_registry_event(
+                                                event_type,
+                                                changed_key.clone(),
+                                                Some(value_name),
+                                                Some(value_type),
+                                                Some(value_data),
+                                                None,
+                                                process_id,
+                                                process_name.clone(),
+                                            );
+                                            
+                                            if let Err(e) = event_sender.send(registry_event).await {
+                                                error!("Failed to send registry event: {}", e);
+                                                *last_error.write().await = Some(format!("Failed to send event: {}", e));
+                                            } else {
+                                                *events_collected.write().await += 1;
+                                            }
+                                        }
+                                    } else {
+                                        // Send event without value details
+                                        let registry_event = self.create_registry_event(
+                                            event_type,
+                                            changed_key.clone(),
+                                            None,
+                                            None,
+                                            None,
+                                            None,
+                                            process_id,
+                                            process_name.clone(),
+                                        );
+                                        
+                                        if let Err(e) = event_sender.send(registry_event).await {
+                                            error!("Failed to send registry event: {}", e);
+                                            *last_error.write().await = Some(format!("Failed to send event: {}", e));
+                                        } else {
+                                            *events_collected.write().await += 1;
+                                        }
+                                    }
+                                }
                             } else {
-                                *events_collected.write().await += 1;
+                                debug!("No specific subkey changes detected, checking for value changes");
+                                // Check for value changes in the monitored key itself
+                                let values = self.enumerate_registry_values(&key_handle).await;
+                                
+                                if !values.is_empty() {
+                                    for (value_name, value_type, value_data) in values {
+                                        let registry_event = self.create_registry_event(
+                                            EventType::RegistryKeyModified,
+                                            key_path.clone(),
+                                            Some(value_name),
+                                            Some(value_type),
+                                            Some(value_data),
+                                            None,
+                                            process_id,
+                                            process_name.clone(),
+                                        );
+                                        
+                                        if let Err(e) = event_sender.send(registry_event).await {
+                                            error!("Failed to send registry event: {}", e);
+                                            *last_error.write().await = Some(format!("Failed to send event: {}", e));
+                                        } else {
+                                            *events_collected.write().await += 1;
+                                        }
+                                    }
+                                }
                             }
                             
                             // Re-register for notifications
@@ -551,7 +756,7 @@ impl RegistryCollector {
             }
         }
         
-        info!("Registry monitoring stopped for key: {}", key_path);
+        debug!("Registry monitoring stopped for key: {}", key_path);
     }
     
     fn parse_registry_path(key_path: &str) -> (windows::Win32::System::Registry::HKEY, String) {

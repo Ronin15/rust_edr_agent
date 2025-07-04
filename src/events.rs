@@ -22,7 +22,7 @@ pub struct Event {
     pub security_critical: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum EventType {
     ProcessCreated,
     ProcessTerminated,

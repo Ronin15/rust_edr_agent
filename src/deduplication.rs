@@ -26,6 +26,8 @@ pub struct DeduplicationConfig {
     pub file_event_rate_per_minute: u32,          // 5
     pub process_event_rate_per_minute: u32,       // 10 (higher for security)
     pub network_event_rate_per_minute: u32,       // 20
+    #[cfg(windows)]
+    pub registry_event_rate_per_minute: u32,      // 15 (registry changes can be frequent)
     pub security_alert_rate_per_hour: u32,        // 5 (never suppress critical alerts)
     
     // Phase 2 Enhancements: Pattern-based deduplication (security-focused)
@@ -62,6 +64,8 @@ impl Default for DeduplicationConfig {
             file_event_rate_per_minute: 2,         // Even tighter rate limiting (was 3)
             process_event_rate_per_minute: 10,
             network_event_rate_per_minute: 20,
+            #[cfg(windows)]
+            registry_event_rate_per_minute: 15,     // Registry can be noisy but security-critical
             security_alert_rate_per_hour: 5,
             
             // Phase 2 Enhancements: Pattern-based deduplication (security-focused)
@@ -440,6 +444,23 @@ impl SecurityAwareDeduplicator {
             EventData::System(sys_data) => {
                 hasher.update(sys_data.description.as_bytes());
             },
+            #[cfg(windows)]
+            EventData::Registry(reg_data) => {
+                hasher.update(reg_data.key_path.as_bytes());
+                
+                if let Some(ref value_name) = reg_data.value_name {
+                    hasher.update(value_name.as_bytes());
+                }
+                
+                if let Some(ref value_data) = reg_data.value_data {
+                    hasher.update(value_data.as_bytes());
+                }
+                
+                // Include value type for more precise deduplication
+                if let Some(ref value_type) = reg_data.value_type {
+                    hasher.update(value_type.as_bytes());
+                }
+            },
             _ => {
                 // Fallback for other event types
                 if let Ok(json) = serde_json::to_string(&event.data) {
@@ -469,6 +490,17 @@ impl SecurityAwareDeduplicator {
             EventData::Network(_) => {
                 format!("network_{}", event.event_type.as_str())
             },
+            #[cfg(windows)]
+            EventData::Registry(reg_data) => {
+                // Group by registry hive/key for burst detection
+                let key_parts: Vec<&str> = reg_data.key_path.split('\\').collect();
+                let hive_key = if key_parts.len() >= 2 {
+                    format!("{}\\\"{}", key_parts[0], key_parts[1])
+                } else {
+                    reg_data.key_path.clone()
+                };
+                format!("registry_{}_{}", event.event_type.as_str(), hive_key)
+            },
             _ => {
                 format!("other_{}", event.event_type.as_str())
             }
@@ -488,6 +520,16 @@ impl SecurityAwareDeduplicator {
             },
             EventData::Process(proc_data) => proc_data.name.clone(),
             EventData::Network(net_data) => net_data.protocol.clone(),
+            #[cfg(windows)]
+            EventData::Registry(reg_data) => {
+                // Use registry hive as context for rate limiting
+                let key_parts: Vec<&str> = reg_data.key_path.split('\\').collect();
+                if !key_parts.is_empty() {
+                    key_parts[0].to_string()
+                } else {
+                    "registry".to_string()
+                }
+            },
             _ => "general".to_string(),
         };
         
@@ -509,6 +551,15 @@ impl SecurityAwareDeduplicator {
             
             EventType::NetworkConnection | EventType::NetworkDnsQuery => 
                 self.config.network_event_rate_per_minute,
+            
+            #[cfg(windows)]
+            EventType::RegistryKeyCreated | EventType::RegistryKeyModified 
+            | EventType::RegistryKeyDeleted => {
+                #[cfg(windows)]
+                return self.config.registry_event_rate_per_minute;
+                #[cfg(not(windows))]
+                return 30; // Default rate limit
+            }
             
             EventType::SecurityAlert => self.config.security_alert_rate_per_hour / 60, // Convert to per-minute
             
@@ -576,6 +627,34 @@ impl SecurityAwareDeduplicator {
                     // Use case-insensitive comparison for Windows
                     if path.to_lowercase().contains(&noisy_path.to_lowercase()) {
                         debug!("Applying aggressive rate limit for Windows noisy path: {}", path);
+                        return base_rate.max(1) / 3; // At least 1 event per minute
+                    }
+                }
+            }
+        }
+        
+        // Apply more aggressive rate limiting for known noisy registry keys
+        #[cfg(windows)]
+        if let EventData::Registry(reg_data) = &event.data {
+            let key_path = &reg_data.key_path;
+            
+            #[cfg(target_os = "windows")]
+            {
+                // Windows high-frequency registry keys get 1/3 of normal rate
+                let windows_noisy_registry_keys = [
+                    "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services",
+                    "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Group Policy",
+                    "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+                    "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager",
+                    "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer",
+                    "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell",
+                    "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule",
+                    "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\WMI",
+                ];
+                
+                for noisy_key in &windows_noisy_registry_keys {
+                    if key_path.starts_with(noisy_key) {
+                        debug!("Applying aggressive rate limit for Windows noisy registry key: {}", key_path);
                         return base_rate.max(1) / 3; // At least 1 event per minute
                     }
                 }

@@ -32,10 +32,20 @@ collectors:
     capture_packets: false
     max_packet_size: 1500
   registry_monitor:
-    enabled: false
+    enabled: true
     watched_keys:
     - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
     - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce
+    - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce
+    - HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Classes\exefile\shell\open\command
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Classes\http\shell\open\command
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Classes\https\shell\open\command
+    - HKEY_CURRENT_USER\SOFTWARE\Classes\exefile\shell\open\command
+    - HKEY_CURRENT_USER\SOFTWARE\Classes\http\shell\open\command
 detectors:
   behavioral:
     enabled: true
@@ -106,9 +116,23 @@ detectors:
         expected_paths:
           - "C:\\Windows\\System32\\"
           - "C:\\Windows\\SysWOW64\\"
-        max_instances: 30
+        max_instances: 50  # Increased for Windows systems
         baseline_risk_reduction: 0.8
         elevated_risk_multiplier: 4.0
+      pwsh:  # PowerShell Core
+        expected_paths:
+          - "C:\\Program Files\\PowerShell\\"
+          - "C:\\Program Files (x86)\\PowerShell\\"
+        max_instances: 10
+        baseline_risk_reduction: 0.7  # PowerShell can be risky
+        elevated_risk_multiplier: 3.0
+      powershell:  # Windows PowerShell
+        expected_paths:
+          - "C:\\Windows\\System32\\WindowsPowerShell\\"
+          - "C:\\Windows\\SysWOW64\\WindowsPowerShell\\"
+        max_instances: 10
+        baseline_risk_reduction: 0.7
+        elevated_risk_multiplier: 3.0
       lsass:
         expected_paths:
           - "C:\\Windows\\System32\\"
@@ -272,6 +296,16 @@ detectors:
         alert_threshold_multiplier: 2.0
         max_alerts_per_hour: 8
         context_type: BrowserData
+    # Warp terminal specific patterns (reduce false positives)
+    warp_terminal_patterns:
+      initialization_commands:
+        - "Remove-Module -Name PSReadline"
+        - "global:_warpOriginalPrompt"
+        - "_warpSessionId"
+      parent_executables:
+        - "Warp.exe"
+        - "warp.exe"
+      risk_reduction: 0.9  # 90% risk reduction for Warp initialization
     network_behavior_rules:
       linux_network_monitor:
         process_patterns:
@@ -408,6 +442,13 @@ detectors:
         - systemd-journal
         - init
         - warp-terminal
+        # Windows-specific trusted parents
+        - services.exe  # Only for service processes
+        - winlogon.exe  # For user session processes
+        - wininit.exe   # System initialization
+        # Warp terminal on Windows
+        - Warp.exe
+        - warp.exe
         # GNOME parent processes
         - gnome-shell
         - gnome-session-binary
@@ -421,6 +462,47 @@ detectors:
       agent_processes:
         - tokio-runtime-w
         - edr-agent
+        - rust_edr_agent
+      # Windows-specific process whitelist additions
+      windows_processes:
+        - svchost.exe
+        - conhost.exe
+        - RuntimeBroker.exe
+        - dllhost.exe
+        - taskhostw.exe
+        - SearchIndexer.exe
+        - SearchProtocolHost.exe
+        - WmiPrvSE.exe
+        - audiodg.exe
+        - fontdrvhost.exe
+        - sihost.exe
+        - ctfmon.exe
+        - TextInputHost.exe
+        - UserOOBEBroker.exe
+        - ShellExperienceHost.exe
+        - StartMenuExperienceHost.exe
+        # Warp terminal related
+        - pwsh.exe
+        - powershell.exe
+        - WindowsTerminal.exe
+        - OpenConsole.exe
+        # Common Windows applications
+        - explorer.exe
+        - winlogon.exe
+        - services.exe
+        - lsass.exe
+        - csrss.exe
+        - smss.exe
+        - wininit.exe
+        - dwm.exe
+        - MsMpEng.exe  # Windows Defender
+        - SecurityHealthService.exe
+        - NisSrv.exe  # Windows Defender Network Inspection
+  registry_monitor:
+    enabled: false
+    watched_keys:
+    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+    - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
   dns_anomaly:
     enabled: true
     max_queries_per_minute: 100
@@ -465,11 +547,6 @@ detectors:
       high_volume_dns:
         max_alerts_per_hour: 3
         cooldown_multiplier: 0.7
-  registry_monitor:
-    enabled: false
-    watched_keys:
-    - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
-    - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
 deduplication:
   # Phase 1: Content-based deduplication
   exact_duplicate_window_secs: 300   # 5 minutes - more aggressive for rapid duplicates
@@ -485,6 +562,7 @@ deduplication:
   process_event_rate_per_minute: 10
   network_event_rate_per_minute: 20
   security_alert_rate_per_hour: 5
+  registry_event_rate_per_minute: 5  # Windows-specific: Registry changes can be frequent
   
   # Phase 2 Enhancements: Pattern-based deduplication
   microsecond_deduplication_window_ms: 50   # 50ms for rapid duplicates - more aggressive
@@ -507,6 +585,14 @@ deduplication:
   cleanup_interval_secs: 300
   max_microsecond_cache_size: 5000          # Sub-second deduplication cache
   max_similarity_cache_size: 3000           # Content similarity cache
+  
+  # Windows-specific deduplication patterns
+  windows_event_patterns:
+    svchost_dedup_window_secs: 60          # svchost.exe generates many similar events
+    explorer_dedup_window_secs: 30         # Explorer.exe file access patterns
+    system_process_dedup_threshold: 0.98   # Higher similarity threshold for system processes
+    registry_burst_threshold: 5            # Registry changes often come in bursts
+    registry_burst_window_secs: 5          # Shorter window for registry bursts
 storage:
   local_storage:
     enabled: true
