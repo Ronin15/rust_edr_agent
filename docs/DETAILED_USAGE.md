@@ -1,26 +1,50 @@
 # Detailed Usage of EDR Agent
 
 ## Running the Agent
+
+### Standard Operation
 ```bash
 # Run in development mode (with debug logs)
 RUST_LOG=debug cargo run
 
-# Run with info level logging
+# Run with info level logging (recommended)
 RUST_LOG=info cargo run
 
-# Run the release build
+# Run the release build (production)
 cargo build --release
 ./target/release/edr-agent
 ```
 
+### Advanced Options
+```bash
+# Custom configuration file
+EDR_CONFIG=/path/to/custom-config.yaml cargo run
+
+# Module-specific logging
+RUST_LOG=edr_agent::detectors::behavioral=debug cargo run
+
+# Performance monitoring
+RUST_LOG=info cargo run | grep -E '(memory|events|batch)'
+```
+
 ## What the Agent Does
-When running, the EDR agent will:
-1. **Load configuration** from `config.yaml`
-2. **Initialize collectors** (process, file, network)
-3. **Start monitoring** system activities
-4. **Generate events** for detected activities
-5. **Store events** as JSON files
-6. **Log activities** to console and log files
+
+When running, the EDR agent performs these operations:
+
+### Initialization Phase (0-2 seconds)
+1. **Load configuration** from `config.yaml` with platform-specific defaults
+2. **Initialize storage manager** with compression and retention settings
+3. **Start collector manager** (process, file, network, registry on Windows)
+4. **Start detector manager** (behavioral detection, DNS anomaly detection)
+5. **Begin event processing pipeline** with batching and deduplication
+
+### Runtime Operations (continuous)
+1. **Monitor system activities** across multiple collectors simultaneously
+2. **Generate structured events** with full metadata and context
+3. **Apply behavioral detection** for threat identification
+4. **Deduplicate events** to reduce noise while preserving security fidelity
+5. **Compress and store events** as gzipped JSON with automatic rotation
+6. **Log activities** with structured logging and daily rotation
 
 ## Where to Find Results
 

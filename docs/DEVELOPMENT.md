@@ -2,12 +2,15 @@
 
 ## Prerequisites
 
-- Rust 1.70+ (2021 edition)
-- Cargo (comes with Rust)
+- **Rust 1.60+** (2021 edition) - Uses modern async/await patterns
+- **Cargo** (comes with Rust)
 - Platform-specific requirements:
-  - **Windows**: For registry monitoring features
-  - **Linux**: For ptrace and system call monitoring
-  - **macOS**: Full compatibility with all features
+  - **Windows**: Windows SDK for registry monitoring and process APIs
+  - **Linux**: procfs, ptrace, and system call monitoring capabilities
+  - **macOS**: Full compatibility with all core features
+- **System Dependencies**:
+  - `pkg-config` (Linux/macOS)
+  - Network access for DNS monitoring tests
 
 ## Quick Start
 
@@ -144,27 +147,109 @@ cargo build --release
 
 ## Implementation Status
 
-### ✅ Fully Implemented
-- **Core Architecture**: Agent orchestration, lifecycle management, async event processing
-- **Configuration System**: YAML-based config with validation and defaults
-- **Process Monitoring**: Real-time process creation/termination/modification tracking with CPU/memory metrics
-- **File System Monitoring**: Live file change detection with hash calculation and metadata extraction
-- **Network Monitoring**: Connection tracking via netstat/lsof with protocol and process mapping
-- **Registry Monitoring**: Windows registry change detection with real-time alerting and threat detection
-- **Behavioral Detection Engine**: Context-aware threat detection with platform-specific rules
-- **Event System**: Unified event format, batching, and structured data
-- **Storage Management**: Compressed storage (90%+ compression), automatic cleanup, retention policies
-- **Logging**: Structured logging with file rotation and console output
-- **Cross-platform Support**: Works on Windows, macOS, and Linux
+### ✅ Fully Implemented Features
+
+#### Core Architecture 
+- **Agent Core (`agent.rs`)**: Complete async orchestration with tokio runtime
+- **Event Processing Pipeline**: Batched event processing with configurable intervals
+- **Graceful Shutdown**: SIGINT handling with proper resource cleanup
+- **Error Handling**: Comprehensive error propagation with anyhow and thiserror
+
+#### Data Collection System
+- **Process Collector**: Real-time process monitoring with:
+  - Process creation/termination/modification events
+  - CPU and memory usage tracking
+  - Command line and environment variable capture
+  - Parent-child process relationships
+- **File Collector**: File system monitoring with:
+  - Real-time file change detection using `notify` crate
+  - SHA-256 hash calculation for integrity monitoring
+  - Platform-specific path filtering
+  - Configurable file size limits and extension filtering
+- **Network Collector**: Network monitoring with:
+  - Connection tracking via system tools (netstat/lsof)
+  - DNS query monitoring and correlation
+  - Protocol detection and process mapping
+
+#### Threat Detection Engines
+- **Behavioral Detector**: Advanced threat detection with:
+  - **Process Injection Detection**: Ptrace, DLL injection, memory manipulation
+  - **Cross-Platform Rules**: Linux, Windows, macOS-specific detection patterns
+  - **Risk Scoring**: Dynamic risk calculation with context awareness
+  - **System Process Recognition**: Baseline understanding of legitimate processes
+  - **Path-Based Analysis**: Suspicious location detection (/tmp, /dev/shm, cache dirs)
+  - **Command Line Analysis**: Injection pattern and malicious command detection
+- **DNS Anomaly Detector**: Comprehensive DNS threat detection with:
+  - **High-Frequency Query Detection**: Rate limiting and threshold monitoring
+  - **Suspicious Domain Patterns**: DGA, base64, free TLD detection
+  - **DNS Tunneling Detection**: TXT record analysis, large response detection
+  - **C2 Communication Detection**: Beaconing pattern analysis
+  - **Data Exfiltration Monitoring**: Volume-based detection algorithms
+  - **Smart Alert Deduplication**: Frequency-based alert suppression
+
+#### Storage and Performance
+- **Storage Manager**: Production-ready storage with:
+  - **Gzip Compression**: 90%+ compression ratio
+  - **Automatic Cleanup**: Configurable retention policies
+  - **Batch Processing**: Efficient I/O with configurable batch sizes
+- **Deduplication Engine**: Intelligent noise reduction with:
+  - **Security-First Approach**: Never deduplicates critical security events
+  - **Type-Based Rules**: Different limits for different event types
+  - **Memory Bounded**: Hard limits prevent memory exhaustion (max 300KB)
+  - **Time-Window Management**: Hourly tracking with automatic cleanup
+
+#### Configuration and Logging
+- **Configuration System**: YAML-based configuration with:
+  - **Platform-Specific Defaults**: Automatic platform detection and filtering
+  - **Validation**: Type checking and constraint validation
+  - **Hot Reload Support**: Infrastructure ready for runtime updates
+- **Logging System**: Production logging with:
+  - **Structured JSON Logging**: Machine-readable log format
+  - **File Rotation**: Daily rotation with automatic cleanup
+  - **Console Output**: Real-time console logging with level filtering
+  - **Environment-Based Filtering**: RUST_LOG support
 
 ### 🔄 Partially Implemented
-- **Network Manager**: Stub implementation for remote data transmission
-- **Testing Framework**: Basic structure exists, comprehensive tests needed
 
-### 📋 Planned/Missing
-- **Security Hardening**: Input validation, privilege separation
-- **Performance Optimization**: High-throughput scenarios
-- **Advanced Analytics**: Event correlation, threat intelligence integration
+#### Windows-Specific Features
+- **Registry Monitoring**: Complete implementation with conditional compilation
+  - Real-time registry change detection
+  - Configurable key watching
+  - Windows-only compilation via cfg attributes
+
+#### Network Communication
+- **Network Manager**: Stub implementation ready for:
+  - Remote server communication
+  - Event transmission
+  - Configuration updates
+  - Health reporting
+
+#### Testing Framework
+- **Integration Tests**: Basic test binaries for:
+  - Linux detection capabilities (`test_linux_detection.rs`)
+  - macOS detection capabilities (`test_mac_detection.rs`) 
+  - DNS anomaly detection (`test_dns_anomaly_detection.rs`)
+  - Core integration testing (`test_integration.rs`)
+
+### 📋 Future Enhancements
+
+#### Security Hardening
+- Input validation and sanitization
+- Privilege separation and capability-based security
+- Event signing and tamper detection
+- Anti-debugging and self-protection
+
+#### Performance and Scale
+- Adaptive batching based on system load
+- Memory pressure detection and management
+- High-throughput optimization for enterprise environments
+- Streaming compression for large event volumes
+
+#### Advanced Analytics
+- Machine learning-based anomaly detection
+- Event correlation and timeline analysis
+- MITRE ATT&CK technique mapping
+- Threat intelligence feed integration
 
 ## Development Workflow
 

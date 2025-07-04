@@ -2,15 +2,16 @@
 
 **Advanced EDR Prototype - Production Architecture, Educational Implementation**
 
-A high-performance EDR agent prototype written in Rust, demonstrating modern security monitoring concepts and cross-platform threat detection. Links have been verified and information is presented in a logical manner.
+A high-performance EDR agent prototype written in Rust, demonstrating modern security monitoring concepts and cross-platform threat detection. This project showcases real-world EDR architecture patterns, async programming, and behavioral detection systems.
 
 ## 🎯 Project Purpose
 
-This educational project showcases:
-- Advanced Rust systems programming and async patterns
-- Production-quality EDR architecture design
-- Cross-platform security monitoring capabilities
-- Real-time behavioral threat detection
+This educational project demonstrates:
+- **Advanced Rust Systems Programming**: Async/await patterns, tokio runtime, cross-platform compatibility
+- **Production EDR Architecture**: Modular collector/detector design, event processing pipelines, storage management
+- **Cross-Platform Security Monitoring**: Windows, Linux, and macOS support with platform-specific detectors
+- **Real-Time Behavioral Detection**: Process injection detection, DNS anomaly detection, registry monitoring
+- **Performance Engineering**: Event deduplication, compression, memory-efficient processing
 
 ## 🚀 Features
 
@@ -44,15 +45,29 @@ This educational project showcases:
 
 ## 📋 Implementation Status
 
-**✅ Fully Implemented**: Core architecture, process/file/network monitoring, behavioral detection, storage with compression, cross-platform support
+**✅ Fully Implemented**: 
+- Core agent architecture with tokio async runtime
+- Event collection system (process, file, network)
+- Behavioral detection engine with cross-platform support
+- DNS anomaly detection with 6+ threat detection types
+- Storage management with gzip compression
+- Intelligent event deduplication (85-90% noise reduction)
+- Configuration system with YAML support
+- Structured logging with file rotation
+- Event batching and processing pipelines
 
-**🔄 Partial**: Network manager (stub), testing framework
+**🔄 Partially Implemented**: 
+- Network manager (stub implementation)
+- Windows registry monitoring (conditional compilation)
+- Testing framework (basic integration tests)
 
-**📋 Planned**: Security hardening, advanced analytics
+**📋 Future Enhancements**: 
+- Advanced threat intelligence integration
+- Machine learning-based anomaly detection
+- Enterprise management console
+- SIEM integrations
 
-**🆕 Recently Added**: Intelligent event deduplication system with 85-90% noise reduction while maintaining 100% security event fidelity
-
-📖 **Complete status in [Development Guide](docs/DEVELOPMENT.md)**
+📖 **Complete implementation details in [Development Guide](docs/DEVELOPMENT.md)**
 
 ## 🛠️ Quick Start
 
@@ -91,6 +106,8 @@ For comprehensive documentation, see the `/docs` directory:
 ### Getting Started
 - **[Quick Usage Guide](docs/USAGE.md)** - Get started in 30 seconds
 - **[Detailed Usage](docs/DETAILED_USAGE.md)** - In-depth usage instructions
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[API Reference](docs/API_REFERENCE.md)** - Complete module and API documentation
 
 ### Advanced Features
 - **[Detection Quick Reference](docs/DETECTION_QUICK_REFERENCE.md)** - ⚡ Fast setup and troubleshooting
@@ -99,7 +116,8 @@ For comprehensive documentation, see the `/docs` directory:
 - **[Linux Detection Capabilities](docs/LINUX_DETECTION.md)** - Linux-specific threat detection
 - **[Detection Configuration](docs/DETECTION_CONFIGURATION.md)** - Tuning and customization guide
 
-### System Management
+### System Management & Development
+- **[Development Guide](docs/DEVELOPMENT.md)** - Architecture, implementation status, and build instructions
 - **[Smart Deduplication](docs/SMART_DEDUPLICATION.md)** - Intelligent alert deduplication system
 - **[Storage Compression](docs/COMPRESSION.md)** - Compression and storage management
 - **[Performance Analysis](docs/PERFORMANCE.md)** - Memory usage and performance metrics
@@ -206,15 +224,32 @@ nslookup evil-domain.tk  # Free TLD abuse
 nslookup dGVzdA==.example.com  # Base64 subdomain
 ```
 
-## 🏗️ Architecture Overview
+## 🏧 Architecture Overview
 
-- **Agent Core**: Orchestrates collectors and detectors
-- **Collectors**: Process, file, network, registry monitoring
-- **Detectors**: Behavioral threat detection engines
-- **Events**: Unified event format and processing
-- **Storage**: Compressed local storage with retention
+### Core Components
 
-📖 **Full architecture diagram in [Development Guide](docs/DEVELOPMENT.md)**
+- **Agent Core (`agent.rs`)**: Main orchestration layer managing all subsystems
+- **Collector Manager**: Coordinates multiple data collection modules
+  - **Process Collector**: System process monitoring and tracking
+  - **File Collector**: File system event monitoring with hashing
+  - **Network Collector**: Network connection and DNS monitoring
+  - **Registry Collector**: Windows registry change detection (Windows only)
+- **Detector Manager**: Threat detection and analysis engines
+  - **Behavioral Detector**: Process injection, suspicious execution patterns
+  - **DNS Anomaly Detector**: Malicious domain detection, tunneling, C2 communication
+- **Event System**: Unified event format, batching, and processing pipeline
+- **Storage Manager**: Compressed storage with automatic retention and cleanup
+- **Deduplication Engine**: Intelligent noise reduction preserving security fidelity
+- **Configuration System**: YAML-based configuration with platform-specific defaults
+
+### Data Flow
+```
+System Events → Collectors → Event Processing → Detectors → Alerts
+                     ↓                ↓
+              Deduplication → Storage (Compressed)
+```
+
+📖 **Detailed architecture and module documentation in [Development Guide](docs/DEVELOPMENT.md)**
 
 ## 🔧 Development
 
