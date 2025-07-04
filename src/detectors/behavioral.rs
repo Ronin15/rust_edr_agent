@@ -1083,7 +1083,12 @@ fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
             }
             
             // 3. Check for process hollowing patterns (process name mismatch with parent expectations)
-            if self.is_potential_process_hollowing(process_name, process_path, parent_name, parent_path) {
+            #[cfg(target_os = "macos")]
+            let is_hollow = self.is_potential_process_hollowing(process_name, process_path, parent_name, parent_path);
+            #[cfg(not(target_os = "macos"))]
+            let is_hollow = self.is_potential_process_hollowing(process_name, process_path, parent_path);
+
+            if is_hollow {
                 return Some(self.create_alert(
                     InjectionEventType::ProcessHollowing,
                     AlertSeverity::Critical,
@@ -1188,6 +1193,60 @@ fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
         true
     }
 
+    #[cfg(not(target_os = "macos"))]
+    fn is_potential_process_hollowing(&self, process_name: &str, process_path: &str, parent_path: &str) -> bool {
+        // Generic checks for all platforms
+        let mut is_hollow = false;
+
+        // Process name/path mismatch detection
+        if let Some(path_filename) = process_path.split('/').last() {
+            let path_basename = path_filename.split('.').next().unwrap_or(path_filename);
+            if process_name != path_basename && !process_name.starts_with(path_basename) {
+                // Known legitimate cases where name doesn't match path
+                let legitimate_renames = [
+                    ("chrome", "google-chrome"),
+                    ("firefox", "mozilla-firefox"),
+                ];
+                
+                if !legitimate_renames.iter().any(|(orig, renamed)| 
+                    (process_name.contains(orig) && path_basename.contains(renamed)) ||
+                    (process_name.contains(renamed) && path_basename.contains(orig))) {
+                    is_hollow = true;
+                }
+            }
+        }
+
+        // System process location checks
+        if self.is_system_process_name(process_name) {
+            let user_writable_dirs = [
+                "/home/", "/Users/", "/tmp/", "/var/tmp/",
+                "/dev/shm/", "AppData", "Local", "Temp", "Downloads",
+            ];
+            
+            if user_writable_dirs.iter().any(|dir| process_path.to_lowercase().contains(dir)) {
+                is_hollow = true;
+            }
+
+            // Path depth check for system processes - allow more nesting
+            let process_depth = process_path.matches('/').count();
+            let parent_depth = parent_path.matches('/').count();
+            if process_depth > parent_depth + 4 { // Increased from 2 to 4
+                is_hollow = true;
+            }
+        }
+
+        // Check for suspicious characters in paths
+        if self.is_system_process_name(process_name) {
+            let suspicious_chars = [" ", "  ", ".", "..", "...", "8a0", "0a00"];
+            if suspicious_chars.iter().any(|c| process_path.contains(c)) {
+                is_hollow = true;
+            }
+        }
+
+        is_hollow
+    }
+
+    #[cfg(target_os = "macos")]
     fn is_potential_process_hollowing(&self, process_name: &str, process_path: &str, parent_name: &str, parent_path: &str) -> bool {
         // Special case for mdworker_shared - we handle it in is_legitimate_macos_process
         #[cfg(target_os = "macos")]

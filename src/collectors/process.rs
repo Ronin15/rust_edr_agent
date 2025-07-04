@@ -241,7 +241,7 @@ impl ProcessCollector {
             path: process_info.path.clone(),
             command_line,
             user: process.user_id().map(|u| u.to_string()),
-            session_id: None, // Not available in sysinfo
+            session_id: process.session_id().map(|id| id.as_u32()),
             start_time: Some(chrono::DateTime::from(process_info.start_time)),
             end_time: None,
             exit_code: None,
