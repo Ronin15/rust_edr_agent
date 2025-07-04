@@ -15,7 +15,7 @@ use crate::config::RegistryMonitorConfig;
 
 #[derive(Debug)]
 pub struct RegistryDetector {
-    config: RegistryMonitorConfig,
+    _config: RegistryMonitorConfig,
     alert_sender: mpsc::Sender<DetectorAlert>,
     registry_tracker: Arc<RwLock<RegistryTracker>>,
     detection_rules: RegistryDetectionRules,
@@ -29,7 +29,6 @@ pub struct RegistryDetector {
 struct RegistryDetectorStats {
     events_processed: u64,
     alerts_generated: u64,
-    keys_tracked: u64,
     last_activity: Option<Instant>,
 }
 
@@ -39,7 +38,6 @@ pub struct RegistryTracker {
     recent_events: VecDeque<RegistryEvent>,
     alert_frequency: HashMap<String, Vec<Instant>>,
     last_cleanup: Instant,
-    baseline_values: HashMap<String, String>, // Known good values for critical keys
 }
 
 #[derive(Debug, Clone)]
@@ -160,7 +158,7 @@ impl RegistryDetector {
         let detection_rules = Self::create_detection_rules();
         
         Ok(Self {
-            config,
+            _config: config,
             alert_sender,
             registry_tracker: Arc::new(RwLock::new(RegistryTracker::new())),
             detection_rules,
@@ -552,7 +550,6 @@ impl RegistryTracker {
             recent_events: VecDeque::new(),
             alert_frequency: HashMap::new(),
             last_cleanup: Instant::now(),
-            baseline_values: HashMap::new(),
         }
     }
 

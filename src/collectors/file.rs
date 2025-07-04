@@ -200,11 +200,14 @@ impl FileCollector {
         
         #[cfg(windows)]
         {
-            // Use environment variables as a safe fallback for Windows
-            let owner = std::env::var("USERNAME").ok()
-                .or_else(|| std::env::var("USER").ok());
-            let group = std::env::var("USERDOMAIN").ok()
-                .unwrap_or_else(|| "Users".to_string());
+            let _metadata = metadata; // Acknowledge the parameter is unused on Windows
+            // Use environment variables for Windows implementation
+            let owner = std::env::var("USERNAME")
+                .or_else(|_| std::env::var("USER"))
+                .ok();
+            
+            let group = std::env::var("USERDOMAIN")
+                .unwrap_or_else(|_| "Users".to_string());
             
             (owner, Some(group))
         }

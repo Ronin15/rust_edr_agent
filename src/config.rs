@@ -542,12 +542,12 @@ impl Default for Config {
                     capture_packets: false,
                     max_packet_size: 1500,
                 },
+                #[cfg(windows)]
+                registry_monitor: RegistryMonitorConfig::default(),
             },
             detectors: DetectorsConfig {
                 #[cfg(windows)]
                 registry_monitor: RegistryMonitorConfig::default(),
-                #[cfg(not(windows))]
-                registry_monitor: RegistryMonitorConfigDummy::default(),
                 behavioral: BehavioralDetectorConfig {
                     enabled: true,
                     scan_interval_ms: 2000,
@@ -565,8 +565,6 @@ impl Default for Config {
                     process_whitelist: ProcessWhitelist::default(),
                 },
                 dns_anomaly: DnsAnomalyDetectorConfig::default(),
-                #[cfg(windows)]
-                registry_monitor: RegistryMonitorConfig { enabled: true, watched_keys: vec![], },
             },
             deduplication: DeduplicationConfig::default(),
             storage: StorageConfig {

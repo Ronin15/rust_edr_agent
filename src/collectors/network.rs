@@ -1085,8 +1085,8 @@ impl NetworkCollector {
         (total_tx, total_rx)
     }
 
-    #[cfg(target_os = "windows")]
-    async fn get_socket_byte_counts(&self, pid: Option<u32>) -> (u64, u64) {
+    #[cfg(windows)]
+    async fn get_socket_byte_counts(&self, _pid: Option<u32>) -> (u64, u64) {
         let mut total_rx = 0u64;
         let mut total_tx = 0u64;
         
@@ -1233,7 +1233,7 @@ impl PeriodicCollector for NetworkCollector {
                             }
                         } else {
                             // New connection - always report (security critical)
-                            let (tx_bytes, rx_bytes) = self.get_socket_byte_counts(connection.pid).await;
+                    let (tx_bytes, rx_bytes) = self.get_socket_byte_counts(connection.pid).await;
                             
                             states.insert(key.clone(), ConnectionState {
                                 first_seen: now,
