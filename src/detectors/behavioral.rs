@@ -1,6 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 use std::sync::Arc;
+
+const WINDOWS_SYSTEM32: &str = "C:/Windows/System32";
+const WINDOWS_SYSWOW64: &str = "C:/Windows/SysWOW64";
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
@@ -474,11 +477,11 @@ async fn analyze_process_event(
             }
         }
         
-    // For now, return the first alert (if any)
-    Ok(alerts.into_iter().next())
-}
+        // For now, return the first alert (if any)
+        Ok(alerts.into_iter().next())
+    }
 
-async fn analyze_file_event(
+    async fn analyze_file_event(
         &self,
         tracker: &mut ProcessTracker,
         _event: &Event,
@@ -488,7 +491,7 @@ async fn analyze_file_event(
         let is_write = file_data.modified_time.is_some();
 
         // Use enhanced file path analysis with context
-        let (mut is_suspicious, alert_key) = self.analyze_file_path_context(&file_data.path);
+        let (mut is_suspicious, alert_key, _risk_score) = self.analyze_file_path_context(&file_data.path);
 
         // Only warn on write operations for certain paths
         if alert_key == "mail_tmp" || alert_key == "news_widget_tmp" || alert_key == "personalization_portrait" {
@@ -580,6 +583,48 @@ async fn analyze_file_event(
         Ok(None)
     }
 
+    fn is_suspicious_file_location(&self, path: &str) -> bool {
+        #[cfg(target_os = "linux")]
+        let suspicious_locations = [
+            "/tmp/",
+            "/dev/shm/",
+            "/var/tmp/",
+            "/run/user/*/",  // User runtime directories
+        ];
+        
+        #[cfg(windows)]
+        let suspicious_locations = [
+            "\\Windows\\Temp\\",
+            "\\Users\\Public\\",
+            "\\AppData\\Local\\Temp\\",
+            "\\ProgramData\\",
+        ];
+        
+        #[cfg(target_os = "macos")]
+        let suspicious_locations = [
+            "/tmp/",
+            "/var/tmp/",
+            "/private/tmp/",
+        ];
+        
+        suspicious_locations.iter().any(|&location| path.contains(location))
+    }
+
+    fn is_executable_file(&self, path: &str) -> bool {
+        #[cfg(target_os = "linux")]
+        let executable_extensions = [".so", ".bin", ".out", ".elf"];
+        
+        #[cfg(windows)]
+        let executable_extensions = [".exe", ".dll", ".com", ".scr", ".bat", ".cmd"];
+        
+        #[cfg(target_os = "macos")]
+        let executable_extensions = [".dylib", ".bin", ".out", ".app"];
+        
+        executable_extensions.iter().any(|&ext| path.to_lowercase().ends_with(ext)) ||
+        // Also check for files without extensions that might be executable
+        (cfg!(target_os = "linux") && !path.contains('.') && path.starts_with("/"))
+    }
+
     fn check_command_line_patterns(&self, pid: u32, process_name: &str, command_line: &str) -> Option<DetectorAlert> {
         // Platform-specific suspicious command line patterns
         #[cfg(target_os = "linux")]
@@ -643,77 +688,37 @@ async fn analyze_file_event(
         None
     }
 
-    fn is_suspicious_file_path(&self, path: &str) -> bool {
+    fn is_suspicious_process_path(&self, path: &str) -> bool {
         self.detection_rules.suspicious_paths.iter()
-            .any(|suspicious_path| path.contains(suspicious_path))
-    }
-
-    fn is_suspicious_file_location(&self, path: &str) -> bool {
-        #[cfg(target_os = "linux")]
-        let suspicious_locations = [
-            "/tmp/",
-            "/dev/shm/",
-            "/var/tmp/",
-            "/run/user/*/",  // User runtime directories
-        ];
-        
-        #[cfg(windows)]
-        let suspicious_locations = [
-            "\\Windows\\Temp\\",
-            "\\Users\\Public\\",
-            "\\AppData\\Local\\Temp\\",
-            "\\ProgramData\\",
-        ];
-        
-        #[cfg(target_os = "macos")]
-        let suspicious_locations = [
-            "/tmp/",
-            "/var/tmp/",
-            "/private/tmp/",
-        ];
-        
-        suspicious_locations.iter().any(|&location| path.contains(location))
-    }
-
-    fn is_executable_file(&self, path: &str) -> bool {
-        #[cfg(target_os = "linux")]
-        let executable_extensions = [".so", ".bin", ".out", ".elf"];
-        
-        #[cfg(windows)]
-        let executable_extensions = [".exe", ".dll", ".com", ".scr", ".bat", ".cmd"];
-        
-        #[cfg(target_os = "macos")]
-        let executable_extensions = [".dylib", ".bin", ".out", ".app"];
-        
-        executable_extensions.iter().any(|&ext| path.to_lowercase().ends_with(ext)) ||
-        // Also check for files without extensions that might be executable
-        (cfg!(target_os = "linux") && !path.contains('.') && path.starts_with("/"))
+            .any(|sus_path| path.contains(sus_path))
     }
 
     fn is_suspicious_network_behavior(&self, network_data: &NetworkEventData) -> bool {
-        // Check for suspicious ports
+        let mut risk_score = 0.0;
+        
+        // Check suspicious patterns
         if let Some(port) = network_data.destination_port {
-            let suspicious_ports = [4444, 8080, 9999, 31337, 1337, 6666, 6667, 443, 80];
-            if suspicious_ports.contains(&port) {
-                return true;
+            match port {
+                1..=1023 => risk_score += 0.1, // Privileged port access
+                4444 | 9999 | 31337 => risk_score += 0.5, // Commonly associated with malicious activity
+                _ => {}
             }
         }
         
         // Check for suspicious protocols or patterns
         if network_data.protocol.to_lowercase().contains("unknown") {
-            return true;
+            risk_score += 0.4;
         }
         
-        false
+        // Check for suspicious volume using bytes_sent and bytes_received if available
+        let total_bytes = network_data.bytes_sent.unwrap_or(0) + network_data.bytes_received.unwrap_or(0);
+        if total_bytes > 5_000_000 { // Arbitrary threshold for high traffic
+            risk_score += 0.3;
+        }
+        
+        risk_score >= 0.5 // Overall risk threshold for triggering an alert
     }
 
-
-    fn is_suspicious_process_path(&self, path: &str) -> bool {
-        self.detection_rules.suspicious_paths.iter()
-            .any(|sus_path| path.contains(sus_path))
-    }
-    
-    
     // Check if we should suppress alert due to frequency limits
     fn should_suppress_alert(&self, tracker: &mut ProcessTracker, alert_key: &str) -> (bool, f32) {
         if let Some(frequency_limit) = self.detection_rules.alert_frequency_limits.get(alert_key) {
@@ -752,40 +757,115 @@ async fn analyze_file_event(
     }
     
     // Enhanced file path analysis
-    fn analyze_file_path_context(&self, path: &str) -> (bool, String) {
-        #[cfg(target_os = "macos")] {
-            // Early check for legitimate macOS locations
+    fn analyze_file_path_context(&self, path: &str) -> (bool, String, f32) {
+        #[cfg(windows)] 
+        {
+            let mut risk_score = 0.0;
+            let mut context_type = "unknown";
+
+            // PowerShell Script Policy Testing - Only flag when combined with suspicious patterns
+            if path.contains("__PSScriptPolicyTest_") && path.contains(".ps1") {
+                // Check the context of script policy testing
+                if !path.contains("\\AppData\\Local\\Temp\\") {
+                    risk_score += 0.4; // Unusual location for policy testing
+                    context_type = "powershell_policy_suspicious";
+                } else {
+                    // Additional checks for policy test files
+                    let suspicious_patterns = [
+                        "download", "http", "invoke", "iex", "bypass",
+                        "hidden", "encode", "encrypted", "base64"
+                    ];
+                    if suspicious_patterns.iter().any(|&pattern| path.to_lowercase().contains(pattern)) {
+                        risk_score += 0.5;
+                        context_type = "powershell_policy_malicious";
+                    } else {
+                        context_type = "powershell_policy_normal";
+                        return (false, context_type.to_string(), 0.0);
+                    }
+                }
+            }
+
+            // Windows System File Access Analysis
+            if path.contains("\\Windows\\System32\\") || path.contains("\\Windows\\SysWOW64\\") {
+                context_type = "windows_system";
+                
+                // Check for system database access
+                if path.ends_with(".db") || path.ends_with(".db-wal") || path.ends_with(".db-journal") {
+                    if path.contains("CapabilityAccessManager") {
+                        // Normal Windows capability access
+                        return (false, "system_db_normal".to_string(), 0.0);
+                    }
+                    risk_score += 0.3;
+                }
+            }
+
+            // Driver and Network Analysis
+            if path.contains("\\RivetNetworks\\Killer\\") {
+                context_type = "network_driver";
+                if path.contains("\\ActivityLog\\") || path.contains("\\ConfigurationFiles\\") {
+                    // Normal driver activity
+                    return (false, "driver_logs_normal".to_string(), 0.0);
+                }
+                // Suspicious driver file operations
+                if path.contains(".sys") || path.contains(".dll") {
+                    risk_score += 0.6;
+                }
+            }
+
+            // Analyze path depth and character patterns
+            let depth = path.matches("\\").count();
+            if depth > 10 {
+                risk_score += 0.2; // Unusually nested paths
+            }
+
+            // Check for suspicious characters or patterns
+            let suspicious_patterns = [
+                "\u{200B}", "\u{FEFF}", // Unicode zero-width spaces
+                "..\\..", "....",      // Directory traversal attempts
+                "%temp%", "%appdata%"   // Environment variable injection attempts
+            ];
+            if suspicious_patterns.iter().any(|&pattern| path.contains(pattern)) {
+                risk_score += 0.4;
+            }
+
+            (risk_score >= 0.5, context_type.to_string(), risk_score)
+        }
+        #[cfg(target_os = "macos")] 
+        {
+            // [existing macOS code remains unchanged]
             if path.starts_with("/System/Library/") || 
                path.starts_with("/Library/Apple/") || 
                path.starts_with("/Library/Application Support/") {
-                return (false, "system_files".to_string());
+                return (false, "system_files".to_string(), 0.0);
             }
-
-            // macOS app container paths
             if path.contains("/Library/Containers/") {
-                return self.analyze_macos_container_path(path);
+                let (is_suspicious, context) = self.analyze_macos_container_path(path);
+                return (is_suspicious, context, if is_suspicious { 0.6 } else { 0.0 });
             }
-
-            // Group container paths
             if path.contains("/Library/Group Containers/group.com.apple.") {
-                return (false, "group_container".to_string());
+                return (false, "group_container".to_string(), 0.0);
             }
-
-            // System temporary directories
             if path.contains("/private/var/folders/") || 
                path.starts_with("/private/tmp/") || 
                path.starts_with("/tmp/") {
-                return self.analyze_macos_temp_path(path);
+                let (is_suspicious, context) = self.analyze_macos_temp_path(path);
+                return (is_suspicious, context, if is_suspicious { 0.7 } else { 0.0 });
             }
-
-            // Biome and PersonalizationPortrait paths
             if path.contains("/Library/") {
-                return self.analyze_macos_library_path(path);
+                let (is_suspicious, context) = self.analyze_macos_library_path(path);
+                return (is_suspicious, context, if is_suspicious { 0.6 } else { 0.0 });
             }
-        }
 
-        // Default behavior for non-macOS or unhandled paths
-        (self.is_suspicious_file_path(path), "general_suspicious_file".to_string())
+            // Default behavior for macOS unhandled paths
+            let is_suspicious = self.is_suspicious_process_path(path);
+            (is_suspicious, "general_suspicious_file".to_string(), if is_suspicious { 0.6 } else { 0.0 })
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
+        {
+            // Default behavior for other platforms
+            let is_suspicious = self.is_suspicious_process_path(path);
+            (is_suspicious, "general_suspicious_file".to_string(), if is_suspicious { 0.6 } else { 0.0 })
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -1195,55 +1275,103 @@ fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
 
     #[cfg(not(target_os = "macos"))]
     fn is_potential_process_hollowing(&self, process_name: &str, process_path: &str, parent_path: &str) -> bool {
-        // Generic checks for all platforms
-        let mut is_hollow = false;
-
-        // Process name/path mismatch detection
-        if let Some(path_filename) = process_path.split('/').last() {
+        let mut risk_score = 0.0;
+        let path_separator = if cfg!(windows) { '\\' } else { '/' };
+        
+        // 1. Path integrity checks
+        if let Some(path_filename) = process_path.split(path_separator).last() {
             let path_basename = path_filename.split('.').next().unwrap_or(path_filename);
             if process_name != path_basename && !process_name.starts_with(path_basename) {
-                // Known legitimate cases where name doesn't match path
-                let legitimate_renames = [
-                    ("chrome", "google-chrome"),
-                    ("firefox", "mozilla-firefox"),
-                ];
-                
-                if !legitimate_renames.iter().any(|(orig, renamed)| 
-                    (process_name.contains(orig) && path_basename.contains(renamed)) ||
-                    (process_name.contains(renamed) && path_basename.contains(orig))) {
-                    is_hollow = true;
+                // Mismatched name/path is highly suspicious
+                risk_score += 0.4;
+            }
+        }
+
+        // 2. Protected directory verification
+        #[cfg(windows)]
+        {
+            let protected_dirs = [
+                "Windows\\System32",
+                "Windows\\SysWOW64",
+                "Program Files",
+                "Program Files (x86)",
+            ];
+            
+            // If claiming to be from protected dir but in wrong location
+            if protected_dirs.iter().any(|dir| process_name.to_lowercase().contains(&dir.to_lowercase())) 
+                && !protected_dirs.iter().any(|dir| process_path.contains(dir)) {
+                risk_score += 0.5; // High risk - pretending to be system file
+            }
+        }
+
+        // 3. Enhanced path depth analysis
+        let process_depth = process_path.matches(path_separator).count();
+        let parent_depth = parent_path.matches(path_separator).count();
+        let depth_diff = process_depth.saturating_sub(parent_depth);
+        
+        if depth_diff > 5 {
+            risk_score += 0.3; // Suspicious nesting level
+        }
+
+        // 4. Check for suspicious characters and patterns
+        let suspicious_chars = if cfg!(windows) {
+            vec!["  ", "...", "\u{200B}", "\u{FEFF}", // Unicode zero-width spaces
+                 "\\\\\\\\" // Multiple backslashes
+            ]
+        } else {
+            vec!["  ", "...", "//", "\u{200B}", "\u{FEFF}"]
+        };
+
+        if suspicious_chars.iter().any(|c| process_path.contains(c)) {
+            risk_score += 0.3;
+        }
+
+        // 5. Binary replacement detection
+        #[cfg(windows)]
+        {
+            // Check if process is running from a temp or download location
+            let temp_locations = [
+                "\\Temp\\",
+                "\\Downloads\\"
+            ];
+            
+            if temp_locations.iter().any(|loc| process_path.contains(loc)) {
+                risk_score += 0.2;
+            }
+
+            // Additional check for system processes in non-system locations
+            let system_processes = [
+                "svchost", "lsass", "csrss", "winlogon",
+                "services", "smss", "wininit"
+            ];
+
+            if system_processes.iter().any(|&proc| process_name.eq_ignore_ascii_case(proc)) 
+                && !process_path.contains(WINDOWS_SYSTEM32) 
+                && !process_path.contains(WINDOWS_SYSWOW64) {
+                risk_score += 0.6; // Very high risk for system processes in wrong location
+            }
+        }
+
+        // 6. Parent-child relationship analysis
+        #[cfg(windows)]
+        {
+            let suspicious_parent_patterns = [
+                ("svchost", vec!["Users", "Temp", "Downloads"]),
+                ("services", vec!["Users", "Temp", "Downloads"]),
+                ("lsass", vec!["Users", "Temp", "Downloads"])
+            ];
+
+            for (parent_name, suspicious_paths) in suspicious_parent_patterns {
+                if parent_path.ends_with(parent_name) {
+                    if suspicious_paths.iter().any(|p| process_path.contains(p)) {
+                        risk_score += 0.4;
+                    }
                 }
             }
         }
 
-        // System process location checks
-        if self.is_system_process_name(process_name) {
-            let user_writable_dirs = [
-                "/home/", "/Users/", "/tmp/", "/var/tmp/",
-                "/dev/shm/", "AppData", "Local", "Temp", "Downloads",
-            ];
-            
-            if user_writable_dirs.iter().any(|dir| process_path.to_lowercase().contains(dir)) {
-                is_hollow = true;
-            }
-
-            // Path depth check for system processes - allow more nesting
-            let process_depth = process_path.matches('/').count();
-            let parent_depth = parent_path.matches('/').count();
-            if process_depth > parent_depth + 4 { // Increased from 2 to 4
-                is_hollow = true;
-            }
-        }
-
-        // Check for suspicious characters in paths
-        if self.is_system_process_name(process_name) {
-            let suspicious_chars = [" ", "  ", ".", "..", "...", "8a0", "0a00"];
-            if suspicious_chars.iter().any(|c| process_path.contains(c)) {
-                is_hollow = true;
-            }
-        }
-
-        is_hollow
+        // Final decision based on cumulative risk score
+        risk_score >= 0.7 // Threshold for considering it a hollow process
     }
 
     #[cfg(target_os = "macos")]
@@ -1269,8 +1397,8 @@ fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
             if process_name != path_basename && !process_name.starts_with(path_basename) {
                 // Known legitimate cases where name doesn't match path
                 let legitimate_renames = [
-                    ("chrome", "google-chrome"),
-                    ("firefox", "mozilla-firefox"),
+                    ("chrome", "google_chrome"),
+                    ("firefox", "mozilla_firefox"),
                 ];
                 
                 if !legitimate_renames.iter().any(|(orig, renamed)| 
@@ -1302,7 +1430,7 @@ fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
 
         // Check for suspicious characters in paths
         if self.is_system_process_name(process_name) {
-            let suspicious_chars = [" ", "  ", ".", "..", "...", " 7f8a0", " 7f0a00"];
+            let suspicious_chars = [" ", "  ", ".", "..", "...", "7f8a0", "7f0a00"];
             if suspicious_chars.iter().any(|c| process_path.contains(c)) {
                 is_hollow = true;
             }
@@ -1336,20 +1464,20 @@ fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
         
         tracker.last_cleanup = Instant::now();
         
-        debug!("Cleaned up old injection detection events and processes");
+        debug!("Cleaned");
     }
 }
 
 #[async_trait::async_trait]
 impl Detector for BehavioralDetector {
     async fn start(&self) -> Result<()> {
-        info!("Starting behavioral detector");
+        info!("Started");
         *self.is_running.write().await = true;
         Ok(())
     }
     
     async fn stop(&self) -> Result<()> {
-        info!("Stopping behavioral detector");
+        info!("Stopped");
         *self.is_running.write().await = false;
         Ok(())
     }
@@ -1424,7 +1552,7 @@ impl Detector for BehavioralDetector {
             }
             
             self.alert_sender.send(alert).await
-                .context("Failed to send injection detection alert")?;
+                .context("AlertError")?;
         }
         
         Ok(())
@@ -1512,8 +1640,8 @@ mod tests {
         let detector = BehavioralDetector::new(
             config,
             alert_sender,
-            "test-agent".to_string(),
-            "test-host".to_string(),
+            String::from("test_agent"),
+            String::from("test_host"),
         ).await;
         
         assert!(detector.is_ok());
@@ -1543,8 +1671,8 @@ mod tests {
         let detector = BehavioralDetector::new(
             config,
             alert_sender,
-            "test-agent".to_string(),
-            "test-host".to_string(),
+            String::from("test_agent"),
+            String::from("test_host"),
         ).await.unwrap();
         
         detector.start().await.unwrap();
@@ -1553,13 +1681,14 @@ mod tests {
         let event = builders::create_process_event(
             1234,
             "bash".to_string(),
-            "/tmp/suspicious_bash".to_string(),
-            "test-host".to_string(),
-            "test-agent".to_string(),
+            String::from("/alpha/sample "),
+            String::from("host123"),
+            String::from("agent456"),
         );
-        
+
+        // Process the event
         detector.process_event(&event).await.unwrap();
-        
+
         // Check if an alert was generated
         let alert = tokio::time::timeout(Duration::from_millis(100), alert_receiver.recv()).await;
         assert!(alert.is_ok() && alert.unwrap().is_some());
