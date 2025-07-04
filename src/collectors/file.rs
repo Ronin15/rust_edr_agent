@@ -1,6 +1,6 @@
 use anyhow::Result;
 use tracing::{info, warn, error, debug};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, RwLock, oneshot};
 use std::sync::Arc;
 use std::path::Path;
 use std::collections::HashMap;
@@ -37,6 +37,8 @@ pub struct FileCollector {
     last_error: Arc<RwLock<Option<String>>>,
     // File event deduplication to prevent noise from busy file systems
     file_states: Arc<RwLock<HashMap<FileKey, FileState>>>,
+    // Shutdown channel to stop the watcher
+    shutdown_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
 }
 
 impl FileCollector {
@@ -61,6 +63,7 @@ impl FileCollector {
             events_collected: Arc::new(RwLock::new(0)),
             last_error: Arc::new(RwLock::new(None)),
             file_states: Arc::new(RwLock::new(HashMap::new())),
+            shutdown_tx: Arc::new(RwLock::new(None)),
         })
     }
     
@@ -268,6 +271,15 @@ impl Collector for FileCollector {
     async fn stop(&self) -> Result<()> {
         info!("Stopping file collector");
         *self.is_running.write().await = false;
+        
+        // Send shutdown signal to watcher
+        if let Some(shutdown_tx) = self.shutdown_tx.write().await.take() {
+            let _ = shutdown_tx.send(());
+        }
+        
+        // Give the watcher a moment to clean up
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
         Ok(())
     }
     
@@ -299,11 +311,26 @@ impl EventCollector for FileCollector {
         // Create a channel for file system events
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<NotifyEvent>();
         
+        // Create shutdown channel for this watch session
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
+        *self.shutdown_tx.write().await = Some(shutdown_tx);
+        
+        // Clone is_running for the watcher closure
+        let is_running = self.is_running.clone();
+        
         // Create the watcher
         let mut watcher = notify::recommended_watcher(move |res| {
+            // Check if we're still running before sending
             if let Ok(event) = res {
-                if let Err(e) = tx.send(event) {
-                    error!("Failed to send file event: {}", e);
+                // Only log error if we're still supposed to be running
+                if let Err(_) = tx.send(event) {
+                    // Channel is closed, which is expected during shutdown
+                    // Only log if we think we should still be running
+                    if let Ok(running) = is_running.try_read() {
+                        if *running {
+                            error!("Failed to send file event: channel closed");
+                        }
+                    }
                 }
             }
         })?;
@@ -324,20 +351,38 @@ impl EventCollector for FileCollector {
         }
         
         // Process file system events
-        while self.is_running().await {
+        loop {
             tokio::select! {
                 Some(notify_event) = rx.recv() => {
+                    if !self.is_running().await {
+                        debug!("File collector stopped, discarding event");
+                        break;
+                    }
+                    
                     if let Err(e) = self.process_notify_event(notify_event).await {
-                        error!("Error processing file event: {}", e);
-                        *self.last_error.write().await = Some(format!("Event processing error: {}", e));
+                        // Only log error if we're still running
+                        if self.is_running().await {
+                            error!("Error processing file event: {}", e);
+                            *self.last_error.write().await = Some(format!("Event processing error: {}", e));
+                        }
                     }
                 }
+                _ = &mut shutdown_rx => {
+                    debug!("File collector received shutdown signal");
+                    break;
+                }
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
-                    // Small sleep to prevent busy waiting
+                    if !self.is_running().await {
+                        debug!("File collector stopped during sleep");
+                        break;
+                    }
                     continue;
                 }
             }
         }
+        
+        // Clean up: drop the watcher to stop file system monitoring
+        drop(watcher);
         
         info!("File system monitoring stopped");
         Ok(())

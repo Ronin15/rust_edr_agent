@@ -288,13 +288,29 @@ pub trait EventCollector: Collector {
     
     async fn run_watcher(&self) -> Result<()> {
         while self.is_running().await {
-            if let Err(e) = self.watch().await {
-                error!("Watcher error in {}: {}", self.name(), e);
-                // Wait a bit before retrying
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            match self.watch().await {
+                Ok(()) => {
+                    // watch() exited normally, check if we should continue
+                    if self.is_running().await {
+                        debug!("Watcher for {} exited unexpectedly, restarting", self.name());
+                        // Wait a bit before retrying
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+                Err(e) => {
+                    // Only log error if we're still supposed to be running
+                    if self.is_running().await {
+                        error!("Watcher error in {}: {}", self.name(), e);
+                        // Wait a bit before retrying
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    } else {
+                        debug!("Watcher for {} exited with error during shutdown: {}", self.name(), e);
+                    }
+                }
             }
         }
         
+        debug!("Watcher for {} stopped gracefully", self.name());
         Ok(())
     }
 }
