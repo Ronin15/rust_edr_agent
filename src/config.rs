@@ -100,21 +100,6 @@ pub struct DetectorsConfig {
     pub dns_anomaly: DnsAnomalyDetectorConfig,
     #[cfg(windows)]
     pub registry_monitor: RegistryMonitorConfig,
-    #[cfg(not(windows))]
-    pub registry_monitor: RegistryMonitorConfigDummy,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegistryMonitorConfigDummy {
-    pub enabled: bool,
-}
-
-impl Default for RegistryMonitorConfigDummy {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

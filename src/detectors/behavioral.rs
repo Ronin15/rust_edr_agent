@@ -2,7 +2,9 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 use std::sync::Arc;
 
+#[cfg(windows)]
 const WINDOWS_SYSTEM32: &str = "C:/Windows/System32";
+#[cfg(windows)]
 const WINDOWS_SYSWOW64: &str = "C:/Windows/SysWOW64";
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
