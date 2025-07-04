@@ -19,6 +19,198 @@ pub struct RegistryCollector {
 }
 
 impl RegistryCollector {
+    #[cfg(windows)]
+    async fn get_value_name(&self, key_handle: &windows::Win32::System::Registry::HKEY, subkey: &str) -> Option<String> {
+        use windows::Win32::System::Registry::*;
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        
+        unsafe {
+            let mut name_size = 0;
+            let mut value_count = 0;
+            
+            // Get info about the key
+            let result = RegQueryInfoKeyW(
+                *key_handle,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut value_count,
+                &mut name_size,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            
+            if result.is_err() || value_count == 0 {
+                return None;
+            }
+            
+            // Allocate buffer for the value name
+            let mut name_buffer = vec![0u16; name_size as usize + 1];
+            let mut name_size = name_size + 1;
+            
+            // Get the last modified value name
+            let result = RegEnumValueW(
+                *key_handle,
+                value_count - 1,
+                windows::core::PWSTR(name_buffer.as_mut_ptr()),
+                &mut name_size,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            
+            if result.is_ok() {
+                name_buffer.truncate(name_size as usize);
+                let os_string = OsString::from_wide(&name_buffer);
+                os_string.into_string().ok()
+            } else {
+                None
+            }
+        }
+    }
+    
+    #[cfg(windows)]
+    async fn get_value_type(&self, key_handle: &windows::Win32::System::Registry::HKEY, subkey: &str) -> Option<String> {
+        use windows::Win32::System::Registry::*;
+        
+        unsafe {
+            let mut value_type = 0u32;
+            
+            let result = RegQueryValueExW(
+                *key_handle,
+                windows::core::PCWSTR::null(),
+                std::ptr::null_mut(),
+                Some(&mut value_type),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            
+            if result.is_ok() {
+                Some(match value_type {
+                    REG_SZ => "REG_SZ".to_string(),
+                    REG_EXPAND_SZ => "REG_EXPAND_SZ".to_string(),
+                    REG_BINARY => "REG_BINARY".to_string(),
+                    REG_DWORD => "REG_DWORD".to_string(),
+                    REG_DWORD_BIG_ENDIAN => "REG_DWORD_BIG_ENDIAN".to_string(),
+                    REG_LINK => "REG_LINK".to_string(),
+                    REG_MULTI_SZ => "REG_MULTI_SZ".to_string(),
+                    REG_RESOURCE_LIST => "REG_RESOURCE_LIST".to_string(),
+                    REG_QWORD => "REG_QWORD".to_string(),
+                    _ => format!("Unknown ({})", value_type),
+                })
+            } else {
+                None
+            }
+        }
+    }
+    
+    #[cfg(windows)]
+    async fn get_value_data(&self, key_handle: &windows::Win32::System::Registry::HKEY, subkey: &str) -> Option<String> {
+        use windows::Win32::System::Registry::*;
+        
+        unsafe {
+            let mut data_size = 0;
+            let mut value_type = 0;
+            
+            // Get required buffer size
+            let result = RegQueryValueExW(
+                *key_handle,
+                windows::core::PCWSTR::null(),
+                std::ptr::null_mut(),
+                Some(&mut value_type),
+                std::ptr::null_mut(),
+                Some(&mut data_size),
+            );
+            
+            if result.is_err() || data_size == 0 {
+                return None;
+            }
+            
+            let mut data_buffer = vec![0u8; data_size as usize];
+            
+            let result = RegQueryValueExW(
+                *key_handle,
+                windows::core::PCWSTR::null(),
+                std::ptr::null_mut(),
+                Some(&mut value_type),
+                Some(data_buffer.as_mut_ptr()),
+                Some(&mut data_size),
+            );
+            
+            if result.is_ok() {
+                match value_type {
+                    REG_SZ | REG_EXPAND_SZ => {
+                        let wide_str = std::slice::from_raw_parts(
+                            data_buffer.as_ptr() as *const u16,
+                            (data_size / 2) as usize,
+                        );
+                        String::from_utf16_lossy(wide_str)
+                            .trim_end_matches('\0')
+                            .to_string()
+                            .into()
+                    }
+                    REG_DWORD => {
+                        let value = u32::from_ne_bytes(
+                            data_buffer[..4].try_into().unwrap_or_default()
+                        );
+                        Some(format!("{}", value))
+                    }
+                    REG_QWORD => {
+                        let value = u64::from_ne_bytes(
+                            data_buffer[..8].try_into().unwrap_or_default()
+                        );
+                        Some(format!("{}", value))
+                    }
+                    _ => Some(format!("<{} bytes of binary data>", data_size)),
+                }
+            } else {
+                None
+            }
+        }
+    }
+    
+    #[cfg(windows)]
+    async fn get_process_info(&self) -> (Option<u32>, Option<String>) {
+        use windows::Win32::System::Threading::GetCurrentProcessId;
+        use windows::Win32::System::ProcessStatus::*;
+        use windows::Win32::Foundation::*;
+        
+        unsafe {
+            let pid = GetCurrentProcessId();
+            let mut process_name = None;
+            
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snapshot.is_invalid() {
+                return (Some(pid), None);
+            }
+            
+            let mut entry = PROCESSENTRY32W {
+                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                ..Default::default()
+            };
+            
+            if Process32FirstW(snapshot, &mut entry).is_ok() {
+                while Process32NextW(snapshot, &mut entry).is_ok() {
+                    if entry.th32ProcessID == pid {
+                        process_name = String::from_utf16_lossy(&entry.szExeFile)
+                            .trim_end_matches('\0')
+                            .to_string()
+                            .into();
+                        break;
+                    }
+                }
+            }
+            
+            CloseHandle(snapshot);
+            (Some(pid), process_name)
+        }
+    }
     pub async fn new(
         config: RegistryMonitorConfig,
         event_sender: mpsc::Sender<Event>,
@@ -41,15 +233,25 @@ impl RegistryCollector {
         })
     }
     
-    fn create_registry_event(&self, event_type: EventType, key_path: String) -> Event {
+    fn create_registry_event(
+        &self,
+        event_type: EventType,
+        key_path: String,
+        value_name: Option<String>,
+        value_type: Option<String>,
+        value_data: Option<String>,
+        old_value_data: Option<String>,
+        process_id: Option<u32>,
+        process_name: Option<String>,
+    ) -> Event {
         let data = EventData::Registry(RegistryEventData {
             key_path,
-            value_name: None,
-            value_type: None,
-            value_data: None,
-            old_value_data: None,
-            process_id: None,
-            process_name: None,
+            value_name,
+            value_type,
+            value_data,
+            old_value_data,
+            process_id,
+            process_name,
         });
         
         Event::new(
@@ -268,7 +470,7 @@ impl RegistryCollector {
         subkey: String,
         event_sender: mpsc::Sender<Event>,
         events_collected: Arc<RwLock<u64>>,
-        _last_error: Arc<RwLock<Option<String>>>,
+        last_error: Arc<RwLock<Option<String>>>,
         hostname: String,
         agent_id: String,
         is_running: Arc<RwLock<bool>>,
@@ -364,6 +566,12 @@ impl RegistryCollector {
                         let registry_event = collector.create_registry_event(
                             EventType::RegistryKeyModified,
                             key_path.clone(),
+                            self.get_value_name(&key_handle, &subkey).await,
+                            self.get_value_type(&key_handle, &subkey).await,
+                            self.get_value_data(&key_handle, &subkey).await,
+                            None,
+                            self.get_process_info().await.0,
+                            self.get_process_info().await.1,
                         );
                         
                         // Send the event asynchronously

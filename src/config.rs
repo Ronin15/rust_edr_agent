@@ -29,6 +29,8 @@ pub struct CollectorsConfig {
     pub process_monitor: ProcessMonitorConfig,
     pub file_monitor: FileMonitorConfig,
     pub network_monitor: NetworkMonitorConfig,
+    #[cfg(windows)]
+    pub registry_monitor: RegistryMonitorConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,9 +98,23 @@ impl Default for RegistryMonitorConfig {
 pub struct DetectorsConfig {
     pub behavioral: BehavioralDetectorConfig,
     pub dns_anomaly: DnsAnomalyDetectorConfig,
+    #[cfg(windows)]
     pub registry_monitor: RegistryMonitorConfig,
-    // pub malware_detector: MalwareDetectorConfig,
-    // pub anomaly_detector: AnomalyDetectorConfig,
+    #[cfg(not(windows))]
+    pub registry_monitor: RegistryMonitorConfigDummy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryMonitorConfigDummy {
+    pub enabled: bool,
+}
+
+impl Default for RegistryMonitorConfigDummy {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -528,6 +544,10 @@ impl Default for Config {
                 },
             },
             detectors: DetectorsConfig {
+                #[cfg(windows)]
+                registry_monitor: RegistryMonitorConfig::default(),
+                #[cfg(not(windows))]
+                registry_monitor: RegistryMonitorConfigDummy::default(),
                 behavioral: BehavioralDetectorConfig {
                     enabled: true,
                     scan_interval_ms: 2000,
@@ -545,13 +565,8 @@ impl Default for Config {
                     process_whitelist: ProcessWhitelist::default(),
                 },
                 dns_anomaly: DnsAnomalyDetectorConfig::default(),
-                registry_monitor: RegistryMonitorConfig {
-                    enabled: cfg!(windows),
-                    watched_keys: vec![
-                        "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
-                        "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run".to_string(),
-                    ],
-                },
+                #[cfg(windows)]
+                registry_monitor: RegistryMonitorConfig { enabled: true, watched_keys: vec![], },
             },
             deduplication: DeduplicationConfig::default(),
             storage: StorageConfig {
