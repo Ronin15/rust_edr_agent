@@ -103,12 +103,18 @@ impl FileCollector {
         
         // Calculate hash if enabled and file is small enough
         let hashes = if self.config.calculate_hashes && 
-                       size.map_or(true, |s| s <= (self.config.max_file_size_mb * 1024 * 1024)) {
-            calculate_file_hash(path_ref).ok().map(|hash| FileHashes {
-                md5: None,
-                sha1: None,
-                sha256: Some(hash),
-            })
+                       size.map_or(false, |s| s <= (self.config.max_file_size_mb * 1024 * 1024)) &&
+                       self.should_calculate_hash_for_file(path_ref) {
+            // Only try to hash if we have a valid size
+            if size.is_some() {
+                calculate_file_hash(path_ref).ok().map(|hash| FileHashes {
+                    md5: None,
+                    sha1: None,
+                    sha256: Some(hash),
+                })
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -529,5 +535,48 @@ impl FileCollector {
         
         let path_lower = file_path.to_lowercase();
         config_patterns.iter().any(|pattern| path_lower.contains(pattern))
+    }
+    
+    /// Determine if we should calculate hash for this file
+    fn should_calculate_hash_for_file(&self, path: &Path) -> bool {
+        // Skip hashing for certain file types that are problematic or not useful
+        let path_str = path.to_string_lossy().to_lowercase();
+        
+        // Skip special files and directories
+        #[cfg(unix)]
+        {
+            if path_str.contains("/dev/") || 
+               path_str.contains("/proc/") || 
+               path_str.contains("/sys/") {
+                return false;
+            }
+        }
+        
+        // Skip temporary and cache files (but still monitor them)
+        if path_str.contains(".tmp") || 
+           path_str.contains(".temp") ||
+           path_str.contains(".cache") ||
+           path_str.contains(".swp") ||
+           path_str.contains(".lock") {
+            return false;
+        }
+        
+        // Skip macOS specific system files
+        #[cfg(target_os = "macos")]
+        {
+            if path_str.contains("/library/biome/") ||
+               path_str.contains("/library/caches/") ||
+               path_str.contains("/.spotlight-v100/") ||
+               path_str.contains("/private/var/folders/") {
+                return false;
+            }
+        }
+        
+        // Only hash regular files
+        if let Ok(metadata) = std::fs::metadata(path) {
+            metadata.is_file()
+        } else {
+            false
+        }
     }
 }

@@ -20,7 +20,10 @@ collectors:
     - .tmp
     - .log
     - .cache
-    max_file_size_mb: 100
+    - .lock
+    - .swp
+    - .pid
+    max_file_size_mb: 10  # Reduced from 100MB to 10MB for faster hashing
     calculate_hashes: true
   network_monitor:
     enabled: true
@@ -469,24 +472,24 @@ detectors:
     - HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
 deduplication:
   # Phase 1: Content-based deduplication
-  exact_duplicate_window_secs: 1800  # 30 minutes (Phase 1 optimization)
+  exact_duplicate_window_secs: 300   # 5 minutes - more aggressive for rapid duplicates
   security_critical_bypass: true
   
   # Phase 2: Burst detection
-  burst_threshold: 5                 # More aggressive (Phase 1 optimization)
-  burst_window_secs: 30              # Shorter window (Phase 1 optimization)
-  burst_summary_interval: 25         # More frequent summaries (Phase 1 optimization)
+  burst_threshold: 3                 # Even more aggressive
+  burst_window_secs: 10              # Much shorter window - 10 seconds
+  burst_summary_interval: 10         # More frequent summaries
   
   # Phase 3: Rate limiting by event type
-  file_event_rate_per_minute: 3      # Tighter rate limiting (Phase 1 optimization)
+  file_event_rate_per_minute: 2      # Even tighter rate limiting for file events
   process_event_rate_per_minute: 10
   network_event_rate_per_minute: 20
   security_alert_rate_per_hour: 5
   
   # Phase 2 Enhancements: Pattern-based deduplication
-  microsecond_deduplication_window_ms: 100  # 100ms for rapid duplicates
+  microsecond_deduplication_window_ms: 50   # 50ms for rapid duplicates - more aggressive
   enable_subsecond_deduplication: true      # Enable sub-second duplicate detection
-  rapid_duplicate_threshold: 3              # 3 identical events within microsecond window
+  rapid_duplicate_threshold: 2              # 2 identical events within microsecond window
   
   # Enhanced content similarity detection
   enable_content_similarity_detection: true # Detect near-identical content

@@ -54,20 +54,20 @@ pub struct DeduplicationConfig {
 impl Default for DeduplicationConfig {
     fn default() -> Self {
         Self {
-            exact_duplicate_window_secs: 1800,    // 30 minutes (was 1 hour)
+            exact_duplicate_window_secs: 300,      // 5 minutes - more aggressive for rapid duplicates
             security_critical_bypass: true,
-            burst_threshold: 5,                    // More aggressive (was 10)
-            burst_window_secs: 30,                 // Shorter window (was 60)
-            burst_summary_interval: 25,            // More frequent summaries (was 100)
-            file_event_rate_per_minute: 3,         // Tighter rate limiting (was 5)
+            burst_threshold: 3,                    // Even more aggressive (was 5)
+            burst_window_secs: 10,                 // Much shorter window (was 30)
+            burst_summary_interval: 10,            // More frequent summaries (was 25)
+            file_event_rate_per_minute: 2,         // Even tighter rate limiting (was 3)
             process_event_rate_per_minute: 10,
             network_event_rate_per_minute: 20,
             security_alert_rate_per_hour: 5,
             
             // Phase 2 Enhancements: Pattern-based deduplication (security-focused)
-            microsecond_deduplication_window_ms: 100, // 100ms for rapid duplicates
+            microsecond_deduplication_window_ms: 50,  // 50ms for rapid duplicates - more aggressive
             enable_subsecond_deduplication: true,     // Enable sub-second duplicate detection
-            rapid_duplicate_threshold: 3,             // 3 identical events within microsecond window
+            rapid_duplicate_threshold: 2,             // 2 identical events within microsecond window
             
             // Enhanced content similarity detection
             enable_content_similarity_detection: true, // Detect near-identical content
@@ -310,12 +310,15 @@ impl SecurityAwareDeduplicator {
         if let Some(state) = detector.get_mut(&burst_key) {
             let time_since_first = now.duration_since(state.first_seen);
             
-            // Check if we're in a burst window
-            if time_since_first < Duration::from_secs(self.config.burst_window_secs) {
-                state.count += 1;
+                // Check if we're in a burst window
+                let effective_window = self.get_burst_window_for_event(event);
+                let effective_threshold = self.get_burst_threshold_for_event(event);
                 
-                // Detect burst pattern
-                if state.count >= self.config.burst_threshold {
+                if time_since_first < Duration::from_secs(effective_window) {
+                    state.count += 1;
+                    
+                    // Detect burst pattern
+                    if state.count >= effective_threshold {
                     let time_since_reported = now.duration_since(state.last_reported);
                     
                     // Generate summary every N events or every minute
@@ -348,7 +351,7 @@ impl SecurityAwareDeduplicator {
     /// Phase 3: Intelligent rate limiting
     async fn check_rate_limit(&self, event: &Event) -> bool {
         let rate_key = self.generate_rate_limit_key(event);
-        let rate_limit = self.get_rate_limit_for_event_type(&event.event_type);
+        let rate_limit = self.get_rate_limit_for_event_type(event);
         let window_duration = Duration::from_secs(60); // 1 minute window
         let now = Instant::now();
         
@@ -475,7 +478,14 @@ impl SecurityAwareDeduplicator {
     /// Generate rate limiting key
     fn generate_rate_limit_key(&self, event: &Event) -> RateLimitKey {
         let context = match &event.data {
-            EventData::File(file_data) => file_data.path.clone(),
+            EventData::File(file_data) => {
+                // Use parent directory for file events to group related files
+                if let Some(parent) = std::path::Path::new(&file_data.path).parent() {
+                    parent.to_string_lossy().to_string()
+                } else {
+                    file_data.path.clone()
+                }
+            },
             EventData::Process(proc_data) => proc_data.name.clone(),
             EventData::Network(net_data) => net_data.protocol.clone(),
             _ => "general".to_string(),
@@ -488,9 +498,9 @@ impl SecurityAwareDeduplicator {
         }
     }
 
-    /// Get rate limit for event type
-    fn get_rate_limit_for_event_type(&self, event_type: &EventType) -> u32 {
-        match event_type {
+    /// Get rate limit for event type with platform-aware adjustments
+    fn get_rate_limit_for_event_type(&self, event: &Event) -> u32 {
+        let base_rate = match &event.event_type {
             EventType::FileCreated | EventType::FileModified | EventType::FileDeleted 
             | EventType::FileAccessed => self.config.file_event_rate_per_minute,
             
@@ -503,7 +513,105 @@ impl SecurityAwareDeduplicator {
             EventType::SecurityAlert => self.config.security_alert_rate_per_hour / 60, // Convert to per-minute
             
             _ => 30, // Default rate limit
+        };
+        
+        // Apply more aggressive rate limiting for known noisy paths
+        if let EventData::File(file_data) = &event.data {
+            let path = &file_data.path;
+            
+            #[cfg(target_os = "macos")]
+            {
+                // macOS high-frequency paths get 1/3 of normal rate
+                let macos_noisy_paths = [
+                    "/Library/Biome/",
+                    "/Library/Caches/com.apple.",
+                    "/Library/Application Support/com.apple.spotlight/",
+                    "/.Spotlight-V100/",
+                    "/private/var/folders/",
+                    "/System/Library/Caches/",
+                ];
+                
+                for noisy_path in &macos_noisy_paths {
+                    if path.contains(noisy_path) {
+                        debug!("Applying aggressive rate limit for macOS noisy path: {}", path);
+                        return base_rate.max(1) / 3; // At least 1 event per minute
+                    }
+                }
+            }
+            
+            #[cfg(target_os = "linux")]
+            {
+                // Linux high-frequency paths get 1/2 of normal rate
+                let linux_noisy_paths = [
+                    "/proc/",
+                    "/sys/",
+                    "/run/user/",
+                    "/var/cache/",
+                    "/var/lib/systemd/",
+                ];
+                
+                for noisy_path in &linux_noisy_paths {
+                    if path.contains(noisy_path) {
+                        debug!("Applying aggressive rate limit for Linux noisy path: {}", path);
+                        return base_rate.max(1) / 2; // At least 1 event per minute
+                    }
+                }
+            }
         }
+        
+        base_rate
+    }
+    
+    /// Get burst threshold for event based on path
+    fn get_burst_threshold_for_event(&self, event: &Event) -> u32 {
+        if let EventData::File(file_data) = &event.data {
+            let path = &file_data.path;
+            
+            #[cfg(target_os = "macos")]
+            {
+                // Lower threshold for noisy macOS paths
+                let macos_noisy_paths = [
+                    "/Library/Biome/",
+                    "/Library/Caches/com.apple.",
+                    "/.Spotlight-V100/",
+                    "/private/var/folders/",
+                ];
+                
+                for noisy_path in &macos_noisy_paths {
+                    if path.contains(noisy_path) {
+                        return 2; // Very low threshold for noisy paths
+                    }
+                }
+            }
+        }
+        
+        self.config.burst_threshold
+    }
+    
+    /// Get burst window for event based on path
+    fn get_burst_window_for_event(&self, event: &Event) -> u64 {
+        if let EventData::File(file_data) = &event.data {
+            let path = &file_data.path;
+            
+            #[cfg(target_os = "macos")]
+            {
+                // Shorter window for noisy macOS paths
+                let macos_noisy_paths = [
+                    "/Library/Biome/",
+                    "/Library/Caches/com.apple.",
+                    "/.Spotlight-V100/",
+                    "/private/var/folders/",
+                ];
+                
+                for noisy_path in &macos_noisy_paths {
+                    if path.contains(noisy_path) {
+                        return 5; // 5 second window for noisy paths
+                    }
+                }
+            }
+        }
+        
+        self.config.burst_window_secs
     }
 
     /// Create summary event for duplicates
@@ -779,7 +887,7 @@ impl SecurityAwareDeduplicator {
             EventData::File(file_data) => {
                 let path = &file_data.path;
                 
-                // Only exclude self-generated event files to avoid monitoring loops
+                // Exclude self-generated event files to avoid monitoring loops
                 let unix_path = path.contains("/projects/rust_projects/edr_agent/data/events_");
                 let windows_path = path.contains("\\projects\\rust_projects\\edr_agent\\data\\events_");
                 
@@ -787,6 +895,9 @@ impl SecurityAwareDeduplicator {
                     debug!("Excluding self-generated event file: {}", path);
                     return true;
                 }
+                
+                // DON'T exclude platform-specific paths - they need monitoring for security!
+                // These will be handled by more aggressive rate limiting instead
                 
                 false
             },

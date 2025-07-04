@@ -3,9 +3,28 @@ use sha2::{Sha256, Digest};
 use std::path::Path;
 
 pub fn calculate_file_hash(file_path: &Path) -> Result<String> {
-    let contents = std::fs::read(file_path)?;
+    use std::io::Read;
+    use std::fs::File;
+    
+    // Open file for reading
+    let mut file = File::open(file_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open file for hashing: {}", e))?;
+    
     let mut hasher = Sha256::new();
-    hasher.update(&contents);
+    let mut buffer = [0; 8192]; // 8KB buffer for efficient reading
+    
+    // Read file in chunks to handle large files efficiently
+    loop {
+        let bytes_read = file.read(&mut buffer)
+            .map_err(|e| anyhow::anyhow!("Failed to read file for hashing: {}", e))?;
+        
+        if bytes_read == 0 {
+            break;
+        }
+        
+        hasher.update(&buffer[..bytes_read]);
+    }
+    
     let result = hasher.finalize();
     Ok(hex::encode(result))
 }
