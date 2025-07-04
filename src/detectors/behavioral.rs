@@ -1233,10 +1233,10 @@ fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
                 is_hollow = true;
             }
 
-            // Path depth check for system processes
+            // Path depth check for system processes - allow more nesting
             let process_depth = process_path.matches('/').count();
             let parent_depth = parent_path.matches('/').count();
-            if process_depth > parent_depth + 2 {
+            if process_depth > parent_depth + 4 { // Increased from 2 to 4
                 is_hollow = true;
             }
         }

@@ -319,6 +319,18 @@ detectors:
         - systemd-timesyncd
         - warp-terminal
         - merge_thread_0
+        # Add frequently triggered processes
+        - dbus-daemon
+        - pulseaudio
+        - pipewire-media-session
+        - rtkit-daemon
+        - gdm-session-worker
+        - gvfsd
+        - gvfsd-fuse
+        - gvfsd-trash
+        - tracker-miner-fs
+        - colord
+        - packagekitd
       # GNOME core processes
         - gnome-shell
         - gnome-session-binary
@@ -355,6 +367,18 @@ detectors:
         - /usr/lib/systemd/systemd
         - /usr/bin/systemctl
         - /opt/warpdotdev/warp-terminal/warp
+        # Common system paths
+        - /usr/bin/
+        - /usr/sbin/
+        - /usr/lib/
+        - /usr/libexec/
+        - /usr/share/
+        - /lib/
+        - /var/lib/
+        # Runtime paths
+        - /run/user/
+        - /run/systemd/
+        - /run/dbus/
         # Display and multimedia paths
         - /usr/bin/Xwayland
         - /usr/bin/pipewire
