@@ -335,6 +335,7 @@ mod tests {
                 enabled: false,
                 watched_paths: vec![],
                 ignored_extensions: vec![],
+                ignored_paths: vec![],
                 max_file_size_mb: 100,
                 calculate_hashes: false,
             },

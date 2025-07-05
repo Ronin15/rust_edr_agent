@@ -56,38 +56,44 @@ pub struct DeduplicationConfig {
 impl Default for DeduplicationConfig {
     fn default() -> Self {
         Self {
-            exact_duplicate_window_secs: 300,      // 5 minutes - more aggressive for rapid duplicates
+            // Phase 1: Balanced content deduplication
+            exact_duplicate_window_secs: 120,      // 2 minutes - balanced for legitimate duplicates
             security_critical_bypass: true,
-            burst_threshold: 3,                    // Even more aggressive (was 5)
-            burst_window_secs: 10,                 // Much shorter window (was 30)
-            burst_summary_interval: 10,            // More frequent summaries (was 25)
-            file_event_rate_per_minute: 2,         // Even tighter rate limiting (was 3)
-            process_event_rate_per_minute: 10,
-            network_event_rate_per_minute: 20,
+            
+            // Phase 2: Moderate burst detection
+            burst_threshold: 5,                    // Moderate threshold
+            burst_window_secs: 30,                 // 30 second window
+            burst_summary_interval: 25,            // Moderate summary frequency
+            
+            // Phase 3: Balanced rate limits
+            file_event_rate_per_minute: 5,         // Balanced rate limiting
+            process_event_rate_per_minute: 15,     // Balanced for process events
+            network_event_rate_per_minute: 25,     // Balanced network limits
             #[cfg(windows)]
-            registry_event_rate_per_minute: 15,     // Registry can be noisy but security-critical
-            security_alert_rate_per_hour: 5,
+            registry_event_rate_per_minute: 8,     // Balanced for registry
+            security_alert_rate_per_hour: 10,      // Keep security alerts flowing
             
-            // Phase 2 Enhancements: Pattern-based deduplication (security-focused)
-            microsecond_deduplication_window_ms: 50,  // 50ms for rapid duplicates - more aggressive
-            enable_subsecond_deduplication: true,     // Enable sub-second duplicate detection
-            rapid_duplicate_threshold: 2,             // 2 identical events within microsecond window
+            // Phase 2 Enhancements: Balanced microsecond deduplication
+            microsecond_deduplication_window_ms: 100,  // 100ms - balanced
+            enable_subsecond_deduplication: true,      // Enable sub-second duplicate detection
+            rapid_duplicate_threshold: 3,              // 3 identical events within microsecond window
             
-            // Enhanced content similarity detection
-            enable_content_similarity_detection: true, // Detect near-identical content
-            content_similarity_threshold: 0.95,        // 95% similarity threshold
-            similarity_window_secs: 60,                // 1 minute window for similarity detection
+            // Enhanced content similarity detection - balanced
+            enable_content_similarity_detection: true,
+            content_similarity_threshold: 0.92,        // 92% similarity threshold
+            similarity_window_secs: 90,                // 1.5 minute window
             
-            // Adaptive rate limiting based on behavior patterns
-            enable_adaptive_rate_limiting: true,       // Adjust rates based on patterns
-            noise_pattern_detection_window: 300,       // 5 minutes to detect noise patterns
-            noise_threshold_multiplier: 2.0,           // Reduce rate by half when noise detected
+            // Adaptive rate limiting - balanced
+            enable_adaptive_rate_limiting: true,
+            noise_pattern_detection_window: 180,       // 3 minutes to detect noise patterns
+            noise_threshold_multiplier: 3.0,           // Reduce rate by 67% when noise detected
             
-            max_hash_cache_size: 10_000,
-            max_burst_states: 1_000,
-            cleanup_interval_secs: 300,            // 5 minutes
-            max_microsecond_cache_size: 5_000,     // Sub-second deduplication cache
-            max_similarity_cache_size: 3_000,      // Content similarity cache
+            // Memory management - balanced
+            max_hash_cache_size: 15_000,              // Balanced cache size
+            max_burst_states: 1_500,                  // Balanced burst tracking
+            cleanup_interval_secs: 240,               // 4 minutes cleanup
+            max_microsecond_cache_size: 7_500,        // Balanced microsecond cache
+            max_similarity_cache_size: 5_000,         // Balanced similarity cache
         }
     }
 }
@@ -281,7 +287,7 @@ impl SecurityAwareDeduplicator {
                 entry.last_seen = now;
                 
                 // Generate summary event for significant duplicates
-                if entry.count % 50 == 0 {  // Every 50th duplicate
+                if entry.count % 25 == 0 {  // Every 25th duplicate
                     debug!("Generating summary for {} duplicates of content hash: {}", entry.count, &content_hash[..8]);
                     return Some(self.create_summary_event(event, entry.count, time_since_first));
                 }
@@ -566,13 +572,13 @@ impl SecurityAwareDeduplicator {
             _ => 30, // Default rate limit
         };
         
-        // Apply more aggressive rate limiting for known noisy paths
+        // Apply extremely aggressive rate limiting for known noisy paths based on data analysis
         if let EventData::File(file_data) = &event.data {
             let path = &file_data.path;
             
             #[cfg(target_os = "macos")]
             {
-                // macOS high-frequency paths get 1/3 of normal rate
+                // macOS high-frequency paths get 1/10 of normal rate (much more aggressive)
                 let macos_noisy_paths = [
                     "/Library/Biome/",
                     "/Library/Caches/com.apple.",
@@ -580,38 +586,44 @@ impl SecurityAwareDeduplicator {
                     "/.Spotlight-V100/",
                     "/private/var/folders/",
                     "/System/Library/Caches/",
+                    "/private/tmp/",
+                    "/var/tmp/",
+                    ".Trash/",
                 ];
                 
                 for noisy_path in &macos_noisy_paths {
                     if path.contains(noisy_path) {
-                        debug!("Applying aggressive rate limit for macOS noisy path: {}", path);
-                        return base_rate.max(1) / 3; // At least 1 event per minute
+                        debug!("Applying ultra-aggressive rate limit for macOS noisy path: {}", path);
+                        return 1; // Fixed 1 event per minute for noisy paths
                     }
                 }
             }
             
             #[cfg(target_os = "linux")]
             {
-                // Linux high-frequency paths get 1/2 of normal rate
+                // Linux high-frequency paths get 1/10 of normal rate (much more aggressive)
                 let linux_noisy_paths = [
                     "/proc/",
                     "/sys/",
                     "/run/user/",
                     "/var/cache/",
                     "/var/lib/systemd/",
+                    "/tmp/",
+                    "/var/tmp/",
+                    "/dev/shm/",
                 ];
                 
                 for noisy_path in &linux_noisy_paths {
                     if path.contains(noisy_path) {
-                        debug!("Applying aggressive rate limit for Linux noisy path: {}", path);
-                        return base_rate.max(1) / 2; // At least 1 event per minute
+                        debug!("Applying ultra-aggressive rate limit for Linux noisy path: {}", path);
+                        return 1; // Fixed 1 event per minute for noisy paths
                     }
                 }
             }
             
             #[cfg(target_os = "windows")]
             {
-                // Windows high-frequency paths get 1/3 of normal rate
+                // Windows high-frequency paths get 1/10 of normal rate (much more aggressive)
                 let windows_noisy_paths = [
                     "C:\\Windows\\Temp\\",
                     "C:\\Windows\\Prefetch\\",
@@ -621,13 +633,15 @@ impl SecurityAwareDeduplicator {
                     "C:\\Windows\\SoftwareDistribution\\",
                     "C:\\Windows\\Logs\\",
                     "C:\\$Recycle.Bin\\",
+                    "C:\\Windows\\ServiceProfiles\\",
+                    "C:\\ProgramData\\Microsoft\\Search\\",
                 ];
                 
                 for noisy_path in &windows_noisy_paths {
                     // Use case-insensitive comparison for Windows
                     if path.to_lowercase().contains(&noisy_path.to_lowercase()) {
-                        debug!("Applying aggressive rate limit for Windows noisy path: {}", path);
-                        return base_rate.max(1) / 3; // At least 1 event per minute
+                        debug!("Applying ultra-aggressive rate limit for Windows noisy path: {}", path);
+                        return 1; // Fixed 1 event per minute for noisy paths
                     }
                 }
             }
@@ -654,8 +668,8 @@ impl SecurityAwareDeduplicator {
                 
                 for noisy_key in &windows_noisy_registry_keys {
                     if key_path.starts_with(noisy_key) {
-                        debug!("Applying aggressive rate limit for Windows noisy registry key: {}", key_path);
-                        return base_rate.max(1) / 3; // At least 1 event per minute
+                        debug!("Applying ultra-aggressive rate limit for Windows noisy registry key: {}", key_path);
+                        return 1; // Fixed 1 event per minute for noisy registry keys
                     }
                 }
             }
@@ -681,7 +695,7 @@ impl SecurityAwareDeduplicator {
                 
                 for noisy_path in &macos_noisy_paths {
                     if path.contains(noisy_path) {
-                        return 2; // Very low threshold for noisy paths
+                        return 1; // Ultra-low threshold for noisy paths
                     }
                 }
             }
@@ -698,7 +712,7 @@ impl SecurityAwareDeduplicator {
                 
                 for noisy_path in &linux_noisy_paths {
                     if path.contains(noisy_path) {
-                        return 2; // Very low threshold for noisy paths
+                        return 1; // Ultra-low threshold for noisy paths
                     }
                 }
             }
@@ -715,7 +729,7 @@ impl SecurityAwareDeduplicator {
                 
                 for noisy_path in &windows_noisy_paths {
                     if path.to_lowercase().contains(&noisy_path.to_lowercase()) {
-                        return 2; // Very low threshold for noisy paths
+                        return 1; // Ultra-low threshold for noisy paths
                     }
                 }
             }
@@ -741,7 +755,7 @@ impl SecurityAwareDeduplicator {
                 
                 for noisy_path in &macos_noisy_paths {
                     if path.contains(noisy_path) {
-                        return 5; // 5 second window for noisy paths
+                        return 2; // 2 second window for noisy paths
                     }
                 }
             }
@@ -758,7 +772,7 @@ impl SecurityAwareDeduplicator {
                 
                 for noisy_path in &linux_noisy_paths {
                     if path.contains(noisy_path) {
-                        return 5; // 5 second window for noisy paths
+                        return 2; // 2 second window for noisy paths
                     }
                 }
             }
@@ -775,7 +789,7 @@ impl SecurityAwareDeduplicator {
                 
                 for noisy_path in &windows_noisy_paths {
                     if path.to_lowercase().contains(&noisy_path.to_lowercase()) {
-                        return 5; // 5 second window for noisy paths
+                        return 2; // 2 second window for noisy paths
                     }
                 }
             }

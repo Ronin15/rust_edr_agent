@@ -169,6 +169,29 @@ impl FileCollector {
     }
     
     fn should_ignore_file(&self, path: &Path) -> bool {
+        let path_str = path.display().to_string();
+        
+        // Check if path is in ignored paths list
+        for ignored_path in &self.config.ignored_paths {
+            let ignored_str = ignored_path.display().to_string();
+            // Check for exact match or if file is under ignored directory
+            if path_str == ignored_str || path_str.starts_with(&format!("{}/", ignored_str)) {
+                debug!("Ignoring file due to ignored path: {}", path_str);
+                return true;
+            }
+            
+            // Also check for relative path matching
+            if let (Ok(canonical_path), Ok(canonical_ignored)) = (path.canonicalize(), ignored_path.canonicalize()) {
+                let canonical_path_str = canonical_path.display().to_string();
+                let canonical_ignored_str = canonical_ignored.display().to_string();
+                if canonical_path_str == canonical_ignored_str || 
+                   canonical_path_str.starts_with(&format!("{}/", canonical_ignored_str)) {
+                    debug!("Ignoring file due to canonical ignored path: {}", path_str);
+                    return true;
+                }
+            }
+        }
+        
         // Check if file extension is in ignored list
         if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
             let ext_with_dot = format!(".{}", extension.to_lowercase());

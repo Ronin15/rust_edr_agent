@@ -47,12 +47,15 @@ pub struct FileMonitorConfig {
     pub enabled: bool,
     pub watched_paths: Vec<PathBuf>,
     pub ignored_extensions: Vec<String>,
+    #[serde(default)]
+    pub ignored_paths: Vec<PathBuf>,
     pub max_file_size_mb: u64,
     pub calculate_hashes: bool,
 }
 
 impl FileMonitorConfig {
     pub fn filter_watched_paths_for_platform(&mut self) {
+        // Filter watched paths based on platform
         self.watched_paths.retain(|path| {
             let path_str = path.to_string_lossy();
             #[cfg(windows)]
@@ -62,6 +65,21 @@ impl FileMonitorConfig {
             #[cfg(not(windows))]
             {
                 !(path_str == "C:\\")
+            }
+        });
+        
+        // Filter ignored paths based on platform
+        self.ignored_paths.retain(|path| {
+            let path_str = path.to_string_lossy();
+            #[cfg(windows)]
+            {
+                // On Windows, keep Windows-style paths and reject Unix-style paths
+                !path_str.starts_with("/")
+            }
+            #[cfg(not(windows))]
+            {
+                // On Unix/Linux/macOS, keep Unix-style paths and reject Windows-style paths
+                !(path_str.starts_with("C:\\") || path_str.contains(":\\\\"))
             }
         });
     }
@@ -309,15 +327,27 @@ impl Config {
     }
     
     fn set_platform_specifics(&mut self) -> Result<()> {
-        let original_paths = self.collectors.file_monitor.watched_paths.clone();
+        let original_watched_paths = self.collectors.file_monitor.watched_paths.clone();
+        let original_ignored_paths = self.collectors.file_monitor.ignored_paths.clone();
+        
         self.collectors.file_monitor.filter_watched_paths_for_platform();
         
-        // Log the filtering results
-        if original_paths.len() != self.collectors.file_monitor.watched_paths.len() {
-            let filtered_out: Vec<_> = original_paths.iter()
+        // Log the filtering results for watched paths
+        if original_watched_paths.len() != self.collectors.file_monitor.watched_paths.len() {
+            let filtered_out: Vec<_> = original_watched_paths.iter()
                 .filter(|p| !self.collectors.file_monitor.watched_paths.contains(p))
                 .collect();
-            println!("Platform-specific path filtering: Removed {} incompatible paths: {:?}", 
+            println!("Platform-specific path filtering: Removed {} incompatible watched paths: {:?}", 
+                     filtered_out.len(), 
+                     filtered_out.iter().map(|p| p.display().to_string()).collect::<Vec<_>>());
+        }
+        
+        // Log the filtering results for ignored paths
+        if original_ignored_paths.len() != self.collectors.file_monitor.ignored_paths.len() {
+            let filtered_out: Vec<_> = original_ignored_paths.iter()
+                .filter(|p| !self.collectors.file_monitor.ignored_paths.contains(p))
+                .collect();
+            println!("Platform-specific path filtering: Removed {} incompatible ignored paths: {:?}", 
                      filtered_out.len(), 
                      filtered_out.iter().map(|p| p.display().to_string()).collect::<Vec<_>>());
         }
@@ -516,6 +546,11 @@ impl Default for Config {
                         ".tmp".to_string(),
                         ".log".to_string(),
                         ".cache".to_string(),
+                    ],
+                    ignored_paths: vec![
+                        PathBuf::from("./data"),
+                        PathBuf::from("./target"),
+                        PathBuf::from("./logs"),
                     ],
                     max_file_size_mb: 100,
                     calculate_hashes: true,

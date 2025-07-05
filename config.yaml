@@ -16,6 +16,27 @@ collectors:
     watched_paths:
     - /
     - C:\
+    ignored_paths:
+    # Exclude agent's own data directory to prevent recursive event loops
+    - /Users/roninxv/projects/rust_projects/edr_agent/data
+    - ./data
+    - data/
+    # Exclude common development and cache directories
+    - /Users/roninxv/projects/rust_projects/edr_agent/target
+    - ./target
+    - target/
+    - /Users/roninxv/projects/rust_projects/edr_agent/logs
+    - ./logs
+    - logs/
+    # Exclude common system cache and temp directories
+    - /private/var/folders/
+    - /Library/Caches/
+    - /System/Library/Caches/
+    - /tmp/
+    - /var/tmp/
+    - /dev/
+    - /proc/
+    - /sys/
     ignored_extensions:
     - .tmp
     - .log
@@ -23,6 +44,8 @@ collectors:
     - .lock
     - .swp
     - .pid
+    - .gz
+    - .json.gz
     max_file_size_mb: 50  # Balanced size for security coverage and performance
     calculate_hashes: true
   network_monitor:
