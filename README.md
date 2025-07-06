@@ -2,7 +2,7 @@
 
 **Advanced EDR Prototype - Production Architecture, Educational Implementation**
 
-A high-performance EDR agent prototype written in Rust, demonstrating modern security monitoring concepts and cross-platform threat detection. This project showcases real-world EDR architecture patterns, async programming, and behavioral detection systems. This is mainly for rust practice. I have intentionally left networking/centeral management and kernel monitoring out of this time for now.
+A high-performance EDR agent prototype written in Rust, demonstrating modern security monitoring concepts and cross-platform threat detection. This project showcases real-world EDR architecture patterns, async programming, and behavioral detection systems. This is mainly for rust practice. I have intentionally left networking/centeral management and kernel monitoring out at this time.. for now.
 
 ## 🎯 Project Purpose
 
