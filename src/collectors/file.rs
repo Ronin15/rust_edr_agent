@@ -67,11 +67,11 @@ impl FileCollector {
         })
     }
     
-    fn create_file_event(&self, event_type: EventType, path: String) -> Event {
+    async fn create_file_event(&self, event_type: EventType, path: String) -> Event {
         let path_ref = Path::new(&path);
-        
-        // Get file metadata if possible
-        let (size, permissions, owner, group, created_time, modified_time) = if let Ok(metadata) = std::fs::metadata(&path) {
+
+        // Get file metadata if possible (using async tokio::fs to avoid blocking)
+        let (size, permissions, owner, group, created_time, modified_time) = if let Ok(metadata) = tokio::fs::metadata(&path).await {
             let size = Some(metadata.len());
             
             // Get permissions in a cross-platform way
@@ -105,19 +105,15 @@ impl FileCollector {
         };
         
         // Calculate hash if enabled and file is small enough
-        let hashes = if self.config.calculate_hashes && 
+        // Note: size.map_or(false, |s| ...) already ensures size is Some and within limits
+        let hashes = if self.config.calculate_hashes &&
                        size.map_or(false, |s| s <= (self.config.max_file_size_mb * 1024 * 1024)) &&
-                       self.should_calculate_hash_for_file(path_ref) {
-            // Only try to hash if we have a valid size
-            if size.is_some() {
-                calculate_file_hash(path_ref).ok().map(|hash| FileHashes {
-                    md5: None,
-                    sha1: None,
-                    sha256: Some(hash),
-                })
-            } else {
-                None
-            }
+                       self.should_calculate_hash_for_file(path_ref).await {
+            calculate_file_hash(path_ref).ok().map(|hash| FileHashes {
+                md5: None,
+                sha1: None,
+                sha256: Some(hash),
+            })
         } else {
             None
         };
@@ -168,9 +164,9 @@ impl FileCollector {
             }.to_string())
     }
     
-    fn should_ignore_file(&self, path: &Path) -> bool {
+    async fn should_ignore_file(&self, path: &Path) -> bool {
         let path_str = path.display().to_string();
-        
+
         // Check if path is in ignored paths list
         for ignored_path in &self.config.ignored_paths {
             let ignored_str = ignored_path.display().to_string();
@@ -179,19 +175,19 @@ impl FileCollector {
                 debug!("Ignoring file due to ignored path: {}", path_str);
                 return true;
             }
-            
+
             // Also check for relative path matching
             if let (Ok(canonical_path), Ok(canonical_ignored)) = (path.canonicalize(), ignored_path.canonicalize()) {
                 let canonical_path_str = canonical_path.display().to_string();
                 let canonical_ignored_str = canonical_ignored.display().to_string();
-                if canonical_path_str == canonical_ignored_str || 
+                if canonical_path_str == canonical_ignored_str ||
                    canonical_path_str.starts_with(&format!("{}/", canonical_ignored_str)) {
                     debug!("Ignoring file due to canonical ignored path: {}", path_str);
                     return true;
                 }
             }
         }
-        
+
         // Check if file extension is in ignored list
         if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
             let ext_with_dot = format!(".{}", extension.to_lowercase());
@@ -199,16 +195,16 @@ impl FileCollector {
                 return true;
             }
         }
-        
-        // Check if file is too large
-        if let Ok(metadata) = std::fs::metadata(path) {
+
+        // Check if file is too large (using async tokio::fs to avoid blocking)
+        if let Ok(metadata) = tokio::fs::metadata(path).await {
             let max_size = self.config.max_file_size_mb * 1024 * 1024;
             if metadata.len() > max_size {
                 debug!("Ignoring large file: {} ({} bytes)", path.display(), metadata.len());
                 return true;
             }
         }
-        
+
         false
     }
     
@@ -416,7 +412,7 @@ impl FileCollector {
     async fn process_notify_event(&self, notify_event: NotifyEvent) -> Result<()> {
         for path in notify_event.paths {
             // Skip if we should ignore this file
-            if self.should_ignore_file(&path) {
+            if self.should_ignore_file(&path).await {
                 continue;
             }
             
@@ -451,7 +447,7 @@ impl FileCollector {
             
             if should_report {
                 // Create and send the event
-                let event = self.create_file_event(event_type, path_str);
+                let event = self.create_file_event(event_type, path_str).await;
                 
                 // Check if still running before sending
                 if !self.is_running().await {
@@ -606,29 +602,29 @@ impl FileCollector {
     }
     
     /// Determine if we should calculate hash for this file
-    fn should_calculate_hash_for_file(&self, path: &Path) -> bool {
+    async fn should_calculate_hash_for_file(&self, path: &Path) -> bool {
         // Skip hashing for certain file types that are problematic or not useful
         let path_str = path.to_string_lossy().to_lowercase();
-        
+
         // Skip special files and directories
         #[cfg(unix)]
         {
-            if path_str.contains("/dev/") || 
-               path_str.contains("/proc/") || 
+            if path_str.contains("/dev/") ||
+               path_str.contains("/proc/") ||
                path_str.contains("/sys/") {
                 return false;
             }
         }
-        
+
         // Skip temporary and cache files (but still monitor them)
-        if path_str.contains(".tmp") || 
+        if path_str.contains(".tmp") ||
            path_str.contains(".temp") ||
            path_str.contains(".cache") ||
            path_str.contains(".swp") ||
            path_str.contains(".lock") {
             return false;
         }
-        
+
         // Skip macOS specific system files
         #[cfg(target_os = "macos")]
         {
@@ -639,9 +635,9 @@ impl FileCollector {
                 return false;
             }
         }
-        
-        // Only hash regular files
-        if let Ok(metadata) = std::fs::metadata(path) {
+
+        // Only hash regular files (using async tokio::fs to avoid blocking)
+        if let Ok(metadata) = tokio::fs::metadata(path).await {
             metadata.is_file()
         } else {
             false

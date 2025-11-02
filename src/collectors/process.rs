@@ -152,9 +152,10 @@ impl ProcessCollector {
                     
                     if has_significant_change {
                         // Create process signature for deduplication
+                        // Using 100KB granularity for better change detection (was 1MB)
                         let signature = (
                             pid_val,
-                            process_info.memory_usage / 1_000_000, // Round to nearest MB
+                            process_info.memory_usage / 100_000, // Round to nearest 100KB for finer granularity
                             format!("{:.1}", process_info.cpu_usage), // Round CPU to 1 decimal
                         );
                         

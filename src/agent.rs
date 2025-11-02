@@ -10,6 +10,7 @@ use crate::collectors::CollectorManager;
 use crate::storage::StorageManager;
 use crate::network::NetworkManager;
 use crate::detectors::{DetectorManager, DetectorAlert};
+use crate::deduplication::{SecurityAwareDeduplicator, DeduplicationConfig};
 
 pub struct Agent {
     config: Config,
@@ -17,6 +18,7 @@ pub struct Agent {
     detector_manager: Arc<DetectorManager>,
     storage_manager: Arc<StorageManager>,
     network_manager: Option<Arc<NetworkManager>>,
+    deduplicator: Arc<SecurityAwareDeduplicator>,
     event_receiver: Arc<RwLock<Option<mpsc::Receiver<Event>>>>,
     alert_receiver: Arc<RwLock<Option<mpsc::Receiver<DetectorAlert>>>>,
     shutdown_sender: Arc<RwLock<Option<mpsc::Sender<()>>>>,
@@ -64,19 +66,25 @@ impl Agent {
             DetectorManager::new(
                 config.detectors.clone(),
                 alert_sender,
-                agent_id, 
+                agent_id,
                 hostname,
             )
             .await
             .context("Failed to initialize detector manager")?
         );
-        
+
+        // Initialize deduplication system
+        let deduplication_config = DeduplicationConfig::default();
+        let deduplicator = Arc::new(SecurityAwareDeduplicator::new(deduplication_config));
+        info!("Deduplication system initialized");
+
         Ok(Self {
             config,
             collector_manager,
             detector_manager,
             storage_manager,
             network_manager,
+            deduplicator,
             event_receiver: Arc::new(RwLock::new(Some(event_receiver))),
             alert_receiver: Arc::new(RwLock::new(Some(alert_receiver))),
             shutdown_sender: Arc::new(RwLock::new(Some(shutdown_sender))),
@@ -86,42 +94,67 @@ impl Agent {
     
     pub async fn run(&self) -> Result<()> {
         info!("Starting EDR Agent");
-        
+
         // Mark as running
         *self.is_running.write().await = true;
-        
+
         // Start collectors
         self.collector_manager.start().await?;
         info!("Collectors started");
-        
+
         // Start detectors
         self.detector_manager.start().await?;
         info!("Detectors started");
-        
+
+        // Start storage cleanup task
+        let storage_manager = Arc::clone(&self.storage_manager);
+        let is_running = Arc::clone(&self.is_running);
+        let cleanup_task = tokio::spawn(async move {
+            // Run cleanup every hour
+            let cleanup_interval = Duration::from_secs(3600);
+            info!("Storage cleanup task started (running every hour)");
+
+            while *is_running.read().await {
+                tokio::time::sleep(cleanup_interval).await;
+
+                if *is_running.read().await {
+                    info!("Running periodic storage cleanup...");
+                    if let Err(e) = storage_manager.cleanup_old_events().await {
+                        error!("Storage cleanup failed: {}", e);
+                    } else {
+                        info!("Storage cleanup completed successfully");
+                    }
+                }
+            }
+
+            info!("Storage cleanup task stopped");
+        });
+
         // Start event processing loop
         let event_receiver = {
             let mut receiver_guard = self.event_receiver.write().await;
             receiver_guard.take()
                 .context("Event receiver already taken")?
         };
-        
+
         let alert_receiver = {
             let mut receiver_guard = self.alert_receiver.write().await;
             receiver_guard.take()
                 .context("Alert receiver already taken")?
         };
-        
+
         info!("Starting alert processing");
-        
-        // Run both event processing and alert handling concurrently
-        let (event_result, alert_result) = tokio::join!(
+
+        // Run event processing, alert handling, and cleanup concurrently
+        let (event_result, alert_result, _cleanup_result) = tokio::join!(
             self.process_events(event_receiver),
-            self.process_alerts(alert_receiver)
+            self.process_alerts(alert_receiver),
+            cleanup_task
         );
-        
+
         event_result?;
         alert_result?;
-        
+
         Ok(())
     }
     
@@ -202,32 +235,65 @@ impl Agent {
         if batch.is_empty() {
             return Ok(());
         }
-        
-        debug!("Processing batch with {} events", batch.len());
-        
-        // Forward events to detectors for analysis
+
+        debug!("Processing batch with {} events (before deduplication)", batch.len());
+
+        // Phase 1: Apply deduplication and create a new batch with allowed events
+        let mut deduplicated_batch = EventBatch::new();
+        let mut events_allowed = 0;
+        let mut events_suppressed = 0;
+        let mut summary_events_generated = 0;
+
         for event in batch.get_events() {
+            let (should_allow, summary_event) = self.deduplicator.should_allow_event(event).await;
+
+            // Add original event if allowed
+            if should_allow {
+                deduplicated_batch.add_event(event.clone());
+                events_allowed += 1;
+            } else {
+                events_suppressed += 1;
+            }
+
+            // Add summary event if generated
+            if let Some(summary) = summary_event {
+                deduplicated_batch.add_event(summary);
+                summary_events_generated += 1;
+            }
+        }
+
+        debug!(
+            "Deduplication results: {} allowed, {} suppressed, {} summaries generated",
+            events_allowed, events_suppressed, summary_events_generated
+        );
+
+        // Phase 2: Forward deduplicated events to detectors for analysis
+        for event in deduplicated_batch.get_events() {
             if let Err(e) = self.detector_manager.process_event(event).await {
                 warn!("Failed to process event in detectors: {}", e);
             }
         }
-        
-        // Store events locally
-        if let Err(e) = self.storage_manager.store_batch(batch).await {
-            error!("Failed to store batch locally: {}", e);
-        }
-        
-        // Send to remote server if network is enabled
-        if let Some(ref network_manager) = self.network_manager {
-            if let Err(e) = network_manager.send_batch(batch).await {
-                warn!("Failed to send batch to remote server: {}", e);
-                // Don't fail here - local storage is our backup
+
+        // Phase 3: Store deduplicated events locally
+        if !deduplicated_batch.is_empty() {
+            if let Err(e) = self.storage_manager.store_batch(&deduplicated_batch).await {
+                error!("Failed to store batch locally: {}", e);
             }
         }
-        
-        // Clear the batch
+
+        // Phase 4: Send to remote server if network is enabled
+        if !deduplicated_batch.is_empty() {
+            if let Some(ref network_manager) = self.network_manager {
+                if let Err(e) = network_manager.send_batch(&deduplicated_batch).await {
+                    warn!("Failed to send batch to remote server: {}", e);
+                    // Don't fail here - local storage is our backup
+                }
+            }
+        }
+
+        // Clear the original batch
         batch.clear();
-        
+
         Ok(())
     }
     
@@ -358,17 +424,14 @@ impl Agent {
     
     pub async fn shutdown(&self) {
         info!("Shutting down EDR Agent");
-        
-        // Step 1: Mark as not running - this signals collectors to stop generating new events
-        *self.is_running.write().await = false;
-        
-        // Step 2: Stop collectors and wait for them to completely finish
+
+        // Step 1: Stop collectors first (but keep is_running = true so events still get processed)
         info!("Stopping collectors...");
         if let Err(e) = self.collector_manager.stop().await {
             error!("Error stopping collectors: {}", e);
         }
-        
-        // Step 3: Wait until all collectors are completely stopped
+
+        // Step 2: Wait until all collectors are completely stopped
         info!("Waiting for collectors to finish current operations...");
         loop {
             let mut all_stopped = true;
@@ -378,30 +441,42 @@ impl Agent {
                     break;
                 }
             }
-            
+
             if all_stopped {
                 info!("All collectors have stopped");
                 break;
             }
-            
+
             // Short sleep to avoid busy waiting
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
-        
-        // Step 4: Give a final moment for any last events to be processed
-        info!("Allowing final events to be processed...");
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
-        // Step 5: Stop detectors
+
+        // Step 3: Give additional time for final events to propagate through the channel
+        // This ensures any events in flight from collectors reach the event receiver
+        info!("Waiting for in-flight events to settle...");
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        // Step 4: Stop detectors
+        info!("Stopping detectors...");
         if let Err(e) = self.detector_manager.stop().await {
             error!("Error stopping detectors: {}", e);
         }
-        
-        // Step 6: Send shutdown signal (this will cause event processing to end and channels to close)
+
+        // Step 5: NOW mark as not running - all collectors are stopped, events have settled
+        // This signals the event processing loop to exit after draining remaining events
+        info!("Marking agent as not running...");
+        *self.is_running.write().await = false;
+
+        // Step 6: Send shutdown signal - this will cause the event loop to break and drain remaining events
+        // The event loop's drain logic (lines 175-195) will handle any buffered events
         if let Some(sender) = self.shutdown_sender.write().await.take() {
             let _ = sender.send(()).await;
         }
-        
+
+        // Step 7: Give time for event processing loop to drain and complete
+        info!("Waiting for event processing to complete...");
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
         info!("EDR Agent shutdown complete");
     }
     

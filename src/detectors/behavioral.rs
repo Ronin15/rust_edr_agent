@@ -1459,14 +1459,32 @@ fn analyze_macos_library_path(&self, path: &str) -> (bool, String) {
     
     fn cleanup_old_events(&self, tracker: &mut ProcessTracker) {
         let cutoff_time = Instant::now() - Duration::from_secs(3600); // Keep 1 hour of events
-        
+
+        // Time-based cleanup
         tracker.recent_events.retain(|event| event.timestamp > cutoff_time);
         tracker.blocked_processes.retain(|_, &mut time| time > cutoff_time);
         tracker.processes.retain(|_, process| process.last_update > cutoff_time);
-        
+
+        // Enforce max size limit to prevent unbounded growth
+        const MAX_PROCESSES: usize = 5000;
+        if tracker.processes.len() > MAX_PROCESSES {
+            // Remove oldest processes (by last_update time) until we're under the limit
+            let mut processes_vec: Vec<_> = tracker.processes.iter()
+                .map(|(pid, state)| (*pid, state.last_update))
+                .collect();
+            processes_vec.sort_by_key(|(_, last_update)| *last_update);
+
+            let to_remove = tracker.processes.len() - MAX_PROCESSES;
+            for (pid, _) in processes_vec.iter().take(to_remove) {
+                tracker.processes.remove(pid);
+            }
+
+            debug!("Process tracker size limit enforced: removed {} old processes", to_remove);
+        }
+
         tracker.last_cleanup = Instant::now();
-        
-        debug!("Cleaned");
+
+        debug!("Cleanup complete: {} processes tracked", tracker.processes.len());
     }
 }
 

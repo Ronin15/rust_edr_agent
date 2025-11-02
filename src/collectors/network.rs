@@ -783,7 +783,7 @@ impl NetworkCollector {
         
         #[cfg(target_os = "macos")]
         let output = Command::new("netstat")
-            .args(["-tuln", "-p", "tcp"])
+            .args(["-p", "tcp", "-an"])
             .output();
             
         #[cfg(target_os = "linux")]
@@ -1282,15 +1282,20 @@ impl PeriodicCollector for NetworkCollector {
                                     }
                                 }
                             }
-                            
-                            events.push(event);
-                            
-                            // For DNS connections, create a single enhanced DNS event (no duplicates)
+
+                            // For DNS connections, use enhanced DNS event instead of regular event
+                            // This avoids duplicates and provides better DNS-specific analysis
                             if self.is_dns_connection(&connection) {
                                 // Use non-blocking DNS enhancement to avoid performance issues
                                 if let Some(enhanced_dns_event) = self.create_enhanced_dns_event_nonblocking(&connection, &key) {
                                     events.push(enhanced_dns_event);
+                                } else {
+                                    // Fallback to regular event if enhancement fails
+                                    events.push(event);
                                 }
+                            } else {
+                                // Regular non-DNS connection - use standard event
+                                events.push(event);
                             }
                         }
                     }
