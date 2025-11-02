@@ -1685,32 +1685,68 @@ mod tests {
             time_based_risk_adjustment: Default::default(),
             process_whitelist: Default::default(),
         };
-        
+
         let (alert_sender, mut alert_receiver) = mpsc::channel(100);
-        
+
         let detector = BehavioralDetector::new(
             config,
             alert_sender,
             String::from("test_agent"),
             String::from("test_host"),
         ).await.unwrap();
-        
+
         detector.start().await.unwrap();
-        
-        // Create a suspicious process event (Linux path)
-        let event = builders::create_process_event(
+
+        // Test 1: Suspicious process in /tmp (should alert)
+        let suspicious_event = builders::create_process_event(
             1234,
             "bash".to_string(),
-            String::from("/alpha/sample "),
+            String::from("/tmp/suspicious_bash"),
             String::from("host123"),
             String::from("agent456"),
         );
 
-        // Process the event
-        detector.process_event(&event).await.unwrap();
+        detector.process_event(&suspicious_event).await.unwrap();
 
-        // Check if an alert was generated
-        let alert = tokio::time::timeout(Duration::from_millis(100), alert_receiver.recv()).await;
-        assert!(alert.is_ok() && alert.unwrap().is_some());
+        // Check if an alert was generated and verify its properties
+        let alert_result = tokio::time::timeout(Duration::from_millis(100), alert_receiver.recv()).await;
+        assert!(alert_result.is_ok(), "Timeout waiting for alert");
+
+        let alert = alert_result.unwrap();
+        assert!(alert.is_some(), "Alert should be generated for suspicious process in /tmp");
+
+        let alert = alert.unwrap();
+
+        // Verify alert contains relevant information about the suspicious path
+        let alert_text = format!("{} {}", alert.title.to_lowercase(), alert.description.to_lowercase());
+        assert!(
+            alert_text.contains("suspicious") || alert_text.contains("tmp") || alert_text.contains("path"),
+            "Alert should mention suspicious path or /tmp. Got: {}", alert.title
+        );
+
+        // Verify risk score is present and reasonable
+        if let Some(risk_str) = alert.metadata.get("risk_score") {
+            if let Ok(risk_score) = risk_str.parse::<f32>() {
+                assert!(risk_score >= 0.5, "Risk score for /tmp process should be >= 0.5, got {}", risk_score);
+            }
+        }
+
+        // Test 2: Legitimate process in safe location (should NOT alert)
+        let legitimate_event = builders::create_process_event(
+            5678,
+            "ls".to_string(),
+            String::from("/bin/ls"),
+            String::from("host123"),
+            String::from("agent456"),
+        );
+
+        detector.process_event(&legitimate_event).await.unwrap();
+
+        // Should NOT generate an alert
+        let no_alert_result = tokio::time::timeout(Duration::from_millis(50), alert_receiver.recv()).await;
+        assert!(
+            no_alert_result.is_err() || no_alert_result.unwrap().is_none(),
+            "No alert should be generated for legitimate process in /bin"
+        );
     }
 }

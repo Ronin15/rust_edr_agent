@@ -143,10 +143,10 @@ async fn test_dns_anomaly_detection() -> anyhow::Result<()> {
             }
         }
     }
-    // Note: Tunneling detection might not trigger immediately as it requires building up statistics
-    if !tunneling_alert_received {
-        println!("⚠️  DNS tunneling alert not detected in this test run (may require more data)");
-    }
+    // Note: Tunneling detection requires building up statistics
+    assert!(tunneling_alert_received,
+        "❌ Test 3 FAILED: DNS tunneling detection should trigger after 15 TXT queries with base64-like subdomains");
+    println!("✅ Test 3 PASSED: DNS tunneling detection working");
     
     // Test 4: Command and Control communication
     println!("\n🎯 Test 4: Command and Control communication");
@@ -179,9 +179,9 @@ async fn test_dns_anomaly_detection() -> anyhow::Result<()> {
             }
         }
     }
-    if !c2_alert_received {
-        println!("⚠️  C2 communication alert not detected in this test run");
-    }
+    assert!(c2_alert_received,
+        "❌ Test 4 FAILED: C2 communication detection should trigger for evil-domain.tk with beaconing pattern");
+    println!("✅ Test 4 PASSED: C2 communication detection working");
     
     // Test 5: Data exfiltration simulation
     println!("\n💾 Test 5: Data exfiltration detection");
@@ -222,9 +222,9 @@ async fn test_dns_anomaly_detection() -> anyhow::Result<()> {
         Err(_) => println!("⚠️  Timeout while waiting for data exfiltration alert")
     }
     
-    if !exfil_alert_received {
-        println!("⚠️  Data exfiltration alert not detected in this test run");
-    }
+    assert!(exfil_alert_received,
+        "❌ Test 5 FAILED: Data exfiltration detection should trigger for 20 events * 200KB = 4MB transfer");
+    println!("✅ Test 5 PASSED: Data exfiltration detection working");
     
     // Get detector status
     let status = detector.get_status().await;
